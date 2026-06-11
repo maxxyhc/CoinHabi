@@ -1,50 +1,45 @@
-# Welcome to your Expo app 👋
+# Financial Tracker App
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A private portfolio dashboard for tracking crypto, Taiwan stocks, US stocks, and cash in a USD-first view.
 
-## Get started
+## Stack
 
-1. Install dependencies
+- Next.js + TypeScript
+- Tailwind CSS
+- Supabase Auth + PostgreSQL
+- Supabase RLS for per-user data isolation
+- Free market data endpoints through a server route
+
+## Local Setup
+
+1. Install dependencies:
 
    ```bash
    npm install
    ```
 
-2. Start the app
+2. Create `.env.local`:
 
    ```bash
-   npx expo start
+   NEXT_PUBLIC_SUPABASE_URL=...
+   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
+   ALLOWED_EMAIL=your@email.com
    ```
 
-In the output, you'll find options to open the app in a
+3. Run the Supabase SQL migration in `supabase/migrations/0001_initial_schema.sql`.
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+4. Start the app:
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+   ```bash
+   npm run dev
+   ```
 
-## Get a fresh project
+## Supabase Notes
 
-When you're ready, run:
+- Use Supabase Auth with email + password.
+- Enable RLS on user data tables.
+- Keep `Enable Data API` enabled.
+- Disable `Automatically expose new tables` if you want to manage API access manually.
+- `Enable automatic RLS` is recommended for future tables.
 
-```bash
-npm run reset-project
-```
-
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+The first version assumes a single allowed email through `ALLOWED_EMAIL`, while still storing data with `user_id` so the app can support more users later.
