@@ -1,3 +1,15 @@
+-- 檔案	                   建立了什麼
+-- 0001_initial_schema	  最初的持倉表
+-- 0002~0004	            錢包追蹤、EVM 網路、比特幣 xpub
+-- 0005.                	收支記帳表
+-- 0006                  	固定支出／訂閱表
+-- 0007.                 	訂閱管理欄位
+-- 0008.                  貸款／債務表
+-- 0009.                	每月預算表
+-- 0010.                  存你的自訂資產名稱 
+
+
+
 create extension if not exists pgcrypto;
 
 create table if not exists public.holdings (

@@ -9,22 +9,22 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#f5f5f7",
-        graphite: "#1d1d1f",
-        titanium: "#86868b",
-        panel: "rgba(255,255,255,0.075)",
-        line: "rgba(255,255,255,0.13)",
-        mint: "#5df2b6",
-        blue: "#6aa8ff",
-        amber: "#ffd166",
-        rose: "#ff6b8a",
+        ink: "rgb(var(--ink) / <alpha-value>)",
+        graphite: "rgb(var(--graphite) / <alpha-value>)",
+        titanium: "rgb(var(--titanium) / <alpha-value>)",
+        panel: "rgb(var(--panel) / <alpha-value>)",
+        line: "rgb(var(--line) / <alpha-value>)",
+        mint: "rgb(var(--mint) / <alpha-value>)",
+        blue: "rgb(var(--blue) / <alpha-value>)",
+        amber: "rgb(var(--amber) / <alpha-value>)",
+        rose: "rgb(var(--rose) / <alpha-value>)",
       },
       boxShadow: {
         glow: "0 24px 80px rgba(0,0,0,0.45)",
       },
       fontFamily: {
         sans: [
-          "Inter",
+          "IBM Plex Sans",
           "ui-sans-serif",
           "system-ui",
           "-apple-system",

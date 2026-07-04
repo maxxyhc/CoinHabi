@@ -2,18 +2,24 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowRight, LockKeyhole } from "lucide-react";
+import { ArrowRight, CircleDollarSign, Eye, EyeOff, LockKeyhole, ShieldCheck } from "lucide-react";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export function AuthForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState<"error" | "success">("error");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const isNotAllowed = searchParams.get("error") === "not_allowed";
+  const confirmationFailed = searchParams.get("error") === "confirmation_failed";
 
   useEffect(() => {
     if (isNotAllowed) {
@@ -24,14 +30,51 @@ export function AuthForm() {
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage("");
+    setMessageType("error");
 
     if (!supabase) {
       setMessage("Supabase environment variables are missing.");
       return;
     }
 
+    if (mode === "signup" && password !== confirmPassword) {
+      setMessage("兩次輸入的密碼不一致。");
+      return;
+    }
+
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (mode === "signup") {
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/confirm`,
+        },
+      });
+      setLoading(false);
+
+      if (error) {
+        setMessage(error.message);
+        return;
+      }
+
+      if (!data.session) {
+        setMessageType("success");
+        setMessage("註冊申請已送出。請到信箱點擊驗證連結，再回來登入。");
+        setPassword("");
+        setConfirmPassword("");
+        return;
+      }
+
+      router.push("/");
+      router.refresh();
+      return;
+    }
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
     setLoading(false);
 
     if (error) {
@@ -43,51 +86,116 @@ export function AuthForm() {
     router.refresh();
   }
 
+  function changeMode(nextMode: "signin" | "signup") {
+    setMode(nextMode);
+    setMessage("");
+    setMessageType("error");
+    setPassword("");
+    setConfirmPassword("");
+  }
+
   return (
-    <main className="flex min-h-screen items-center justify-center px-4 py-8 sm:px-8 sm:py-12">
-      <section className="glass-panel grid w-full max-w-5xl grid-cols-1 overflow-hidden rounded-lg lg:grid-cols-[1.05fr_0.95fr]">
-        <div className="flex min-h-[560px] flex-col justify-between border-b border-line p-7 sm:p-10 lg:min-h-[620px] lg:border-b-0 lg:border-r">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white text-graphite">
-              <LockKeyhole size={20} />
-            </div>
-            <div>
-              <p className="text-sm uppercase text-titanium">Financial Tracker</p>
-              <h1 className="text-3xl font-semibold text-ink">Private portfolio access</h1>
-            </div>
+    <main className="min-h-screen px-4 py-5 sm:px-8 sm:py-8">
+      <header className="mx-auto flex max-w-6xl items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="primary-button flex h-11 w-11 items-center justify-center rounded-[16px]">
+            <CircleDollarSign size={21} />
           </div>
-
-          <div className="max-w-md">
-            <p className="text-4xl font-semibold leading-tight text-ink sm:text-6xl">Your portfolio, in one view.</p>
-            <p className="mt-6 text-lg leading-8 text-titanium">
-              Sign in to access your private financial dashboard.
-            </p>
+          <div>
+            <p className="font-semibold text-ink">Financial Tracker</p>
+            <p className="text-xs text-titanium">Private portfolio workspace</p>
           </div>
+        </div>
+        <ThemeToggle compact />
+      </header>
 
-          <div className="grid grid-cols-3 gap-3 text-sm text-titanium">
-            <div className="border-t border-line pt-4">US Equities</div>
-            <div className="border-t border-line pt-4">Taiwan Equities</div>
-            <div className="border-t border-line pt-4">Digital Assets</div>
+      <section className="mx-auto grid min-h-[calc(100vh-96px)] max-w-6xl items-center gap-12 py-10 lg:grid-cols-[1fr_440px]">
+        <div className="hidden max-w-xl lg:block">
+          <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-line bg-panel/80 px-3 py-2 text-sm text-titanium shadow-sm">
+            <ShieldCheck className="text-mint" size={17} />
+            Watch-only wallet tracking
+          </div>
+          <h1 className="text-5xl font-semibold leading-[1.05] tracking-[-0.055em] text-ink xl:text-6xl">
+            所有資產，<br />清楚放在一起。
+          </h1>
+          <p className="mt-6 max-w-lg text-lg leading-8 text-titanium">
+            整合美股、台股、加密貨幣與公開錢包地址，以一致的方式查看市值、來源與風險。
+          </p>
+          <div className="mt-10 grid grid-cols-3 gap-3">
+            {["手動持倉", "地址追蹤", "即時價格"].map((item, index) => (
+              <div key={item} className="subtle-panel apple-card-sm p-4">
+                <p className="text-xs text-titanium">0{index + 1}</p>
+                <p className="mt-5 text-sm font-medium text-ink">{item}</p>
+              </div>
+            ))}
           </div>
         </div>
 
-        <div className="flex items-center p-7 sm:p-10">
+        <div className="glass-panel apple-card p-6 sm:p-8">
           <form onSubmit={handleSubmit} className="w-full space-y-6">
+            <div className="accent-mark flex h-11 w-11 items-center justify-center rounded-[16px]">
+              <LockKeyhole size={20} />
+            </div>
             <div>
-              <p className="text-sm text-titanium">Welcome back</p>
-              <h2 className="mt-2 text-4xl font-semibold text-ink">Sign in</h2>
+              <p className="text-sm font-medium" style={{ color: "var(--accent)" }}>私人帳戶</p>
+              <h2 className="mt-2 text-3xl font-semibold tracking-[-0.025em] text-ink">
+                {mode === "signin" ? "歡迎回來" : "建立你的帳號"}
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-titanium">
+                {mode === "signin"
+                  ? "登入以查看你的投資組合與錢包同步狀態。"
+                  : "使用 Email 建立獨立帳號，你的資料會與其他使用者分開。"}
+              </p>
             </div>
 
-            {(message || isNotAllowed) && (
-              <div className="rounded-lg border border-rose/40 bg-rose/10 p-4 text-sm text-rose">
-                {isNotAllowed ? "This email is not allowed for this app." : message}
+            <div className="grid grid-cols-2 gap-1 rounded-2xl border border-line bg-[var(--surface-muted)] p-1">
+              <button
+                aria-pressed={mode === "signin"}
+                className={`focus-ring min-h-11 rounded-xl text-sm font-semibold transition ${
+                  mode === "signin"
+                    ? "bg-[var(--surface-raised)] text-[var(--accent)] shadow-sm"
+                    : "text-titanium"
+                }`}
+                onClick={() => changeMode("signin")}
+                type="button"
+              >
+                登入
+              </button>
+              <button
+                aria-pressed={mode === "signup"}
+                className={`focus-ring min-h-11 rounded-xl text-sm font-semibold transition ${
+                  mode === "signup"
+                    ? "bg-[var(--surface-raised)] text-[var(--accent)] shadow-sm"
+                    : "text-titanium"
+                }`}
+                onClick={() => changeMode("signup")}
+                type="button"
+              >
+                建立帳號
+              </button>
+            </div>
+
+            {(message || isNotAllowed || confirmationFailed) && (
+              <div
+                role={messageType === "error" || isNotAllowed || confirmationFailed ? "alert" : "status"}
+                className={`apple-card-sm border p-4 text-sm ${
+                  messageType === "success" && !isNotAllowed && !confirmationFailed
+                    ? "border-mint/30 bg-mint/10 text-mint"
+                    : "border-rose/30 bg-rose/10 text-rose"
+                }`}
+              >
+                {isNotAllowed
+                  ? "這個 Email 尚未獲得使用權限。"
+                  : confirmationFailed
+                    ? "Email 驗證連結無效或已過期，請重新註冊。"
+                    : message}
               </div>
             )}
 
             <label className="block">
-              <span className="text-sm text-titanium">Email</span>
+              <span className="text-sm font-medium text-ink">Email</span>
               <input
-                className="focus-ring mt-2 w-full rounded-lg border border-line bg-white/5 px-4 py-3 text-ink"
+                className="input-control focus-ring mt-2 w-full px-4 text-ink"
                 type="email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
@@ -97,25 +205,57 @@ export function AuthForm() {
             </label>
 
             <label className="block">
-              <span className="text-sm text-titanium">Password</span>
-              <input
-                className="focus-ring mt-2 w-full rounded-lg border border-line bg-white/5 px-4 py-3 text-ink"
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-                autoComplete="current-password"
-              />
+              <span className="text-sm font-medium text-ink">密碼</span>
+              <span className="relative mt-2 block">
+                <input
+                  className="input-control focus-ring w-full px-4 pr-12 text-ink"
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                  autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                />
+                <button aria-label={showPassword ? "隱藏密碼" : "顯示密碼"} className="focus-ring absolute right-1 top-1 flex h-10 w-10 items-center justify-center rounded-full text-titanium hover:text-ink" onClick={() => setShowPassword((current) => !current)} type="button">
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </span>
             </label>
 
+            {mode === "signup" && (
+              <label className="block">
+                <span className="text-sm font-medium text-ink">確認密碼</span>
+                <input
+                  className="input-control focus-ring mt-2 w-full px-4 text-ink"
+                  type={showPassword ? "text" : "password"}
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  required
+                  autoComplete="new-password"
+                />
+              </label>
+            )}
+
             <button
-              className="focus-ring flex w-full items-center justify-center gap-2 rounded-lg bg-ink px-4 py-3 font-medium text-graphite transition hover:bg-white"
+              className="primary-button focus-ring flex min-h-12 w-full items-center justify-center gap-2 rounded-full px-4 font-medium transition disabled:opacity-60"
               disabled={loading}
               type="submit"
             >
-              {loading ? "Working..." : "Sign in"}
+              {loading
+                ? mode === "signin" ? "登入中..." : "建立中..."
+                : mode === "signin" ? "登入" : "建立帳號"}
               <ArrowRight size={18} />
             </button>
+            {mode === "signup" && (
+              <p className="text-xs leading-5 text-titanium">
+                若此網站啟用了私人白名單，完成 Email 驗證後仍需由管理員加入使用權限。
+              </p>
+            )}
+            <div className="border-t border-line pt-5">
+              <div className="flex gap-3 text-xs leading-5 text-titanium">
+                <ShieldCheck className="mt-0.5 shrink-0 text-mint" size={17} />
+                <p>地址追蹤只使用 public address。請勿在任何地方輸入助記詞、private key 或 PIN。</p>
+              </div>
+            </div>
           </form>
         </div>
       </section>

@@ -29,3 +29,12 @@ coverage/
 .DS_Store
 *.pem
 .vercel
+
+# tooling and local metadata
+.claude/
+.codex/
+.agents/
+.pnpm-store/
+
+# large design assets (not needed for build/deploy)
+open-design/
