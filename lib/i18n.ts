@@ -42,7 +42,7 @@ export function isLocale(value: unknown): value is Locale {
 
 export const dictionary = {
   en: {
-    appName: "Financial Tracker",
+    appName: "Coinhabi",
     appSubtitle: "Private portfolio command center",
     dashboard: "Dashboard",
     holdings: "Holdings",
@@ -108,7 +108,7 @@ export const dictionary = {
     baseCurrencyHelp: "Portfolio totals are normalized to USD. TWD holdings use the latest FX rate.",
   },
   zh: {
-    appName: "資產追蹤",
+    appName: "Coinhabi",
     appSubtitle: "你的私人投資組合中控台",
     dashboard: "總覽",
     holdings: "持倉",
@@ -174,7 +174,7 @@ export const dictionary = {
     baseCurrencyHelp: "投資組合總額統一換算成 USD。台股與 TWD 現金會使用最新匯率。",
   },
   ja: {
-    appName: "資産トラッカー",
+    appName: "Coinhabi",
     appSubtitle: "プライベートなポートフォリオ管理センター",
     dashboard: "ダッシュボード",
     holdings: "保有資産",
@@ -240,7 +240,7 @@ export const dictionary = {
     baseCurrencyHelp: "ポートフォリオ合計はUSDに換算されます。TWD資産は最新の為替レートを使用します。",
   },
   ko: {
-    appName: "자산 트래커",
+    appName: "Coinhabi",
     appSubtitle: "개인 포트폴리오 관리 센터",
     dashboard: "대시보드",
     holdings: "보유 자산",
@@ -306,7 +306,7 @@ export const dictionary = {
     baseCurrencyHelp: "포트폴리오 합계는 USD로 환산됩니다. TWD 자산은 최신 환율을 사용합니다.",
   },
   es: {
-    appName: "Rastreador financiero",
+    appName: "Coinhabi",
     appSubtitle: "Centro de control de tu cartera privada",
     dashboard: "Resumen",
     holdings: "Posiciones",

@@ -6,7 +6,7 @@ export const metadata: Metadata = {
     follow: false,
     index: false,
   },
-  title: "Financial Tracker Demo",
+  title: "Coinhabi Demo",
 };
 
 export default function DemoPage() {

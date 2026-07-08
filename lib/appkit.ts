@@ -30,7 +30,7 @@ if (isWalletConnectConfigured) {
     defaultNetwork: mainnet,
     projectId: reownProjectId,
     metadata: {
-      name: "Financial Tracker",
+      name: "Coinhabi",
       description: "Read-only portfolio and public wallet tracking",
       url: process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3021",
       icons: [],

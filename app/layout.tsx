@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Financial Tracker",
+  title: "Coinhabi",
   description: "A private portfolio tracker for crypto, Taiwan stocks, US stocks, and cash.",
 };
 

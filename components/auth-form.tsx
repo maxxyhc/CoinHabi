@@ -118,7 +118,7 @@ export function AuthForm() {
             <CircleDollarSign size={21} />
           </div>
           <div>
-            <p className="font-semibold text-ink">{tx(locale, "Financial Tracker")}</p>
+            <p className="font-semibold text-ink">Coinhabi</p>
             <p className="text-xs text-titanium">{tx(locale, "Private portfolio workspace")}</p>
           </div>
         </div>
