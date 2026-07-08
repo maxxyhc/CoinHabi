@@ -1,3 +1,4 @@
+import { tx } from "@/lib/i18n";
 import type {
   CashflowTransaction,
   Currency,
@@ -289,18 +290,18 @@ export function buildFinancialHealthNotes({
   const notes: string[] = [];
 
   if (incomeUsd <= 0) {
-    notes.push(zh ? "先記錄本月收入，儲蓄率、固定支出壓力與負債收入比才會更準。" : "Add this month's income so savings rate, fixed pressure, and debt-to-income become meaningful.");
+    notes.push(tx(locale, "Add this month's income so savings rate, fixed pressure, and debt-to-income become meaningful."));
   }
   if (savingsRate !== null && savingsRate < 0) {
-    notes.push(zh ? "本月預估結餘為負，代表收入扣掉支出、固定扣款與債務最低付款後不夠用。" : "Estimated leftover is negative after expenses, recurring bills, and debt minimums.");
+    notes.push(tx(locale, "Estimated leftover is negative after expenses, recurring bills, and debt minimums."));
   } else if (savingsRate !== null && savingsRate < 10) {
-    notes.push(zh ? "本月儲蓄率偏低，可以先從固定支出或預算超支分類開始檢查。" : "Savings rate is low. Start by reviewing recurring costs or over-budget categories.");
+    notes.push(tx(locale, "Savings rate is low. Start by reviewing recurring costs or over-budget categories."));
   }
   if (fixedPressure !== null && fixedPressure > 70) {
-    notes.push(zh ? "固定支出壓力偏高，收入中太多比例已被固定扣款與債務最低付款占用。" : "Fixed-cost pressure is high; recurring bills and debt minimums are taking a large share of income.");
+    notes.push(tx(locale, "Fixed-cost pressure is high; recurring bills and debt minimums are taking a large share of income."));
   }
   if (debtIncomeRatio !== null && debtIncomeRatio > 36) {
-    notes.push(zh ? "負債收入比偏高，建議優先檢查高利率債務與最低付款安排。" : "Debt-to-income is elevated. Review high-interest debts and minimum payment plans first.");
+    notes.push(tx(locale, "Debt-to-income is elevated. Review high-interest debts and minimum payment plans first."));
   }
   if (overBudgetCount > 0) {
     notes.push(zh ? `目前有 ${overBudgetCount} 個預算分類超支。` : `${overBudgetCount} budget categories are currently over budget.`);
@@ -312,10 +313,10 @@ export function buildFinancialHealthNotes({
     notes.push(zh ? `有 ${unknownCostCount} 筆資產成本未知，總損益與報酬率會不完整。` : `${unknownCostCount} holdings have unknown cost, so gain/loss and return are incomplete.`);
   }
   if (dataIssues > unknownCostCount) {
-    notes.push(zh ? "部分資產缺少價格資料，總市值可能低估或不完整。" : "Some holdings are missing price data, so total value may be understated or incomplete.");
+    notes.push(tx(locale, "Some holdings are missing price data, so total value may be understated or incomplete."));
   }
   if (!notes.length) {
-    notes.push(zh ? "目前沒有明顯警訊。你可以持續補齊收入、支出、預算與成本資料，讓這頁更準。" : "No major warnings right now. Keep income, spending, budgets, and cost basis updated to improve this view.");
+    notes.push(tx(locale, "No major warnings right now. Keep income, spending, budgets, and cost basis updated to improve this view."));
   }
 
   return notes;
@@ -344,28 +345,28 @@ export function buildHealthQuests({
   const quests: HealthQuest[] = [];
 
   if (savingsRate === null) {
-    quests.push({ id: "record-income", label: zh ? "記錄本月收入，讓儲蓄率能被計算" : "Log this month's income so savings rate can be calculated", points: 15 });
+    quests.push({ id: "record-income", label: tx(locale, "Log this month's income so savings rate can be calculated"), points: 15 });
   } else if (savingsRate < 0) {
-    quests.push({ id: "savings-positive", label: zh ? "讓本月結餘轉正（收入 > 全部支出）" : "Get this month's leftover back to positive", points: 12 });
+    quests.push({ id: "savings-positive", label: tx(locale, "Get this month's leftover back to positive"), points: 12 });
   } else if (savingsRate < 10) {
-    quests.push({ id: "savings-10", label: zh ? "把本月儲蓄率拉到 10% 以上" : "Raise savings rate above 10%", points: 10 });
+    quests.push({ id: "savings-10", label: tx(locale, "Raise savings rate above 10%"), points: 10 });
   } else if (savingsRate < 20) {
-    quests.push({ id: "savings-20", label: zh ? "把本月儲蓄率拉到 20% 以上" : "Raise savings rate above 20%", points: 8 });
+    quests.push({ id: "savings-20", label: tx(locale, "Raise savings rate above 20%"), points: 8 });
   }
 
   if (fixedPressure === null) {
-    quests.push({ id: "record-fixed", label: zh ? "補齊收入資料，計算固定支出壓力" : "Add income data to unlock fixed-cost pressure", points: 10 });
+    quests.push({ id: "record-fixed", label: tx(locale, "Add income data to unlock fixed-cost pressure"), points: 10 });
   } else if (fixedPressure > 70) {
-    quests.push({ id: "fixed-70", label: zh ? "把固定支出壓力降到 70% 以下" : "Bring fixed-cost pressure below 70%", points: 13 });
+    quests.push({ id: "fixed-70", label: tx(locale, "Bring fixed-cost pressure below 70%"), points: 13 });
   } else if (fixedPressure > 50) {
-    quests.push({ id: "fixed-50", label: zh ? "把固定支出壓力降到 50% 以下" : "Bring fixed-cost pressure below 50%", points: 12 });
+    quests.push({ id: "fixed-50", label: tx(locale, "Bring fixed-cost pressure below 50%"), points: 12 });
   }
 
   if (debtIncomeRatio !== null) {
     if (debtIncomeRatio > 36) {
-      quests.push({ id: "dti-36", label: zh ? "把負債收入比降到 36% 以下" : "Bring debt-to-income below 36%", points: 12 });
+      quests.push({ id: "dti-36", label: tx(locale, "Bring debt-to-income below 36%"), points: 12 });
     } else if (debtIncomeRatio > 20) {
-      quests.push({ id: "dti-20", label: zh ? "把負債收入比降到 20% 以下" : "Bring debt-to-income below 20%", points: 8 });
+      quests.push({ id: "dti-20", label: tx(locale, "Bring debt-to-income below 20%"), points: 8 });
     }
   }
 

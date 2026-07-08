@@ -8,6 +8,7 @@ import {
   CircleDollarSign,
   Ellipsis,
   LayoutDashboard,
+  Languages,
   LogOut,
   Pencil,
   Plus,
@@ -23,6 +24,7 @@ import clsx from "clsx";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { WalletTracker } from "@/components/wallet-tracker";
+import { localeNames, localeOrder, tx } from "@/lib/i18n";
 import {
   aggregateHoldingsForOverview,
   buildFinancialHealthNotes,
@@ -361,10 +363,10 @@ function MobileHeader({
       : "My finances";
   const titles: Record<MobileTab, string> = {
     home: homeTitle,
-    holdings: zh ? "投資持倉" : "Holdings",
-    cashflow: zh ? "收支記錄" : "Cashflow",
-    insights: zh ? "投資分析" : "Insights",
-    more: zh ? "更多工具" : "More",
+    holdings: tx(locale, "Holdings"),
+    cashflow: tx(locale, "Cashflow"),
+    insights: tx(locale, "Insights"),
+    more: tx(locale, "More"),
   };
 
   return (
@@ -377,7 +379,7 @@ function MobileHeader({
             </h1>
             {tab === "home" && (
               <button
-                aria-label={zh ? "編輯資產名稱" : "Edit portfolio name"}
+                aria-label={tx(locale, "Edit portfolio name")}
                 className="focus-ring flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-titanium"
                 onClick={onEditName}
                 type="button"
@@ -388,21 +390,26 @@ function MobileHeader({
           </div>
           {refreshedAt && (
             <p className="mt-0.5 truncate text-[10px] text-titanium">
-              {zh ? "更新於" : "Updated"} {new Date(refreshedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              {tx(locale, "Updated")} {new Date(refreshedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </p>
           )}
         </div>
         <div className="flex items-center gap-1.5">
+          <label className="focus-within:ring-2 focus-within:ring-[var(--accent)]/35 relative flex h-9 min-w-[104px] cursor-pointer items-center justify-center gap-1.5 rounded-full border border-line bg-[var(--surface-raised)] px-3">
+            <Languages aria-hidden="true" className="shrink-0 text-[var(--accent)]" size={15} />
+            <span className="text-[11px] font-semibold text-ink">{localeNames[locale]}</span>
+            <select
+              aria-label={tx(locale, "Language")}
+              title={localeNames[locale]}
+              className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
+              value={locale}
+              onChange={(event) => onLocaleChange(event.target.value as Locale)}
+            >
+              {localeOrder.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}
+            </select>
+          </label>
           <button
-            aria-label={zh ? "切換英文" : "Switch to Chinese"}
-            className="focus-ring flex h-9 min-w-9 items-center justify-center rounded-full border border-line bg-[var(--surface-raised)] px-2.5 text-[11px] font-semibold text-titanium"
-            onClick={() => onLocaleChange(zh ? "en" : "zh")}
-            type="button"
-          >
-            {zh ? "EN" : "中"}
-          </button>
-          <button
-            aria-label={zh ? "更新價格" : "Refresh prices"}
+            aria-label={tx(locale, "Refresh prices")}
             className="focus-ring flex h-9 w-9 items-center justify-center rounded-full border border-line bg-[var(--surface-raised)] text-[var(--accent)]"
             onClick={onRefresh}
             type="button"
@@ -432,7 +439,6 @@ function MobileHome({
   onAddHolding: () => void;
   onOpenHoldings: () => void;
 }) {
-  const zh = locale === "zh";
   const monthly = getTransactionBuckets(monthTransactions);
   const topHoldings = [...overview]
     .sort((a, b) => b.valueUsd - a.valueUsd)
@@ -448,7 +454,7 @@ function MobileHome({
         <div className="relative">
           <div className="flex items-center justify-between gap-3">
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-titanium">
-              {zh ? "總資產" : "Total portfolio"}
+              {tx(locale, "Total portfolio")}
             </p>
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
               <CircleDollarSign size={16} />
@@ -467,7 +473,7 @@ function MobileHome({
               {dayPositive ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
               {formatCurrency(totals.dayChange)} · {formatPercent(totals.dayChangePercent)}
             </span>
-            <span className="text-[11px] text-titanium">{zh ? "今日" : "today"}</span>
+            <span className="text-[11px] text-titanium">{tx(locale, "today")}</span>
           </div>
           {allocationSegments.length > 0 && (
             <>
@@ -496,10 +502,10 @@ function MobileHome({
             type="button"
           >
             <span className="font-medium text-titanium">
-              {overview.length} {zh ? "項資產" : "assets"}
+              {overview.length} {tx(locale, "assets")}
             </span>
             <span className="flex items-center gap-0.5">
-              {zh ? "查看持倉" : "View holdings"}
+              {tx(locale, "View holdings")}
               <ChevronRight size={14} />
             </span>
           </button>
@@ -509,13 +515,13 @@ function MobileHome({
       <div className="grid grid-cols-2 gap-3">
         <MobileMetric
           icon={totals.totalGain >= 0 ? <TrendingUp size={15} /> : <TrendingDown size={15} />}
-          label={zh ? "未實現損益" : "Unrealized P/L"}
+          label={tx(locale, "Unrealized P/L")}
           tone={totals.totalGain >= 0 ? "positive" : "negative"}
           value={formatCurrency(totals.totalGain)}
         />
         <MobileMetric
           icon={<ReceiptText size={15} />}
-          label={zh ? "本月支出" : "Monthly spending"}
+          label={tx(locale, "Monthly spending")}
           tone="negative"
           value={formatBuckets(monthly.expense)}
         />
@@ -524,25 +530,25 @@ function MobileHome({
       <div className="grid grid-cols-2 gap-3">
         <QuickAction
           icon={<ReceiptText size={17} />}
-          label={zh ? "記一筆收支" : "Add transaction"}
+          label={tx(locale, "Add transaction")}
           onClick={onAddCashflow}
         />
         <QuickAction
           icon={<WalletCards size={17} />}
-          label={zh ? "新增持倉" : "Add holding"}
+          label={tx(locale, "Add holding")}
           onClick={onAddHolding}
         />
       </div>
 
       <section className="rounded-[24px] border border-line bg-[var(--surface-raised)] px-4 py-4 shadow-[var(--shadow-soft)]">
         <div className="flex items-center justify-between">
-          <h2 className="text-[15px] font-semibold text-ink">{zh ? "主要資產" : "Top assets"}</h2>
+          <h2 className="text-[15px] font-semibold text-ink">{tx(locale, "Top assets")}</h2>
           <button
             className="focus-ring flex items-center gap-0.5 text-xs font-semibold text-[var(--accent)]"
             onClick={onOpenHoldings}
             type="button"
           >
-            {zh ? "全部" : "All"}
+            {tx(locale, "All")}
             <ChevronRight size={13} />
           </button>
         </div>
@@ -569,7 +575,6 @@ function MobileHoldings({
   onAdd: () => void;
   onDelete: (id: string) => void;
 }) {
-  const zh = locale === "zh";
   const [sort, setSort] = useState<"value" | "day" | "return">("value");
   const totalValue = holdings.reduce((sum, holding) => sum + holding.valueUsd, 0);
   const sorters: Record<typeof sort, (a: EnrichedHolding, b: EnrichedHolding) => number> = {
@@ -579,10 +584,10 @@ function MobileHoldings({
   };
   const groups = (
     [
-      { label: zh ? "美股" : "US stocks", type: "us_stock" },
-      { label: zh ? "台股" : "Taiwan stocks", type: "tw_stock" },
-      { label: zh ? "加密貨幣" : "Crypto", type: "crypto" },
-      { label: zh ? "現金" : "Cash", type: "cash" },
+      { label: tx(locale, "US stocks"), type: "us_stock" },
+      { label: tx(locale, "Taiwan stocks"), type: "tw_stock" },
+      { label: tx(locale, "Crypto"), type: "crypto" },
+      { label: tx(locale, "Cash"), type: "cash" },
     ] as const
   )
     .map((group) => ({
@@ -592,9 +597,9 @@ function MobileHoldings({
     }))
     .filter((group) => group.items.length > 0);
   const sortOptions = [
-    { id: "value", label: zh ? "市值" : "Value" },
-    { id: "day", label: zh ? "今日漲跌" : "Today" },
-    { id: "return", label: zh ? "報酬率" : "Return" },
+    { id: "value", label: tx(locale, "Value") },
+    { id: "day", label: tx(locale, "Today") },
+    { id: "return", label: tx(locale, "Return") },
   ] as const;
 
   return (
@@ -605,7 +610,7 @@ function MobileHoldings({
         type="button"
       >
         <Plus size={19} />
-        {zh ? "新增持倉" : "Add holding"}
+        {tx(locale, "Add holding")}
       </button>
 
       <div className="grid grid-cols-3 gap-1 rounded-full border border-line bg-[var(--surface-muted)] p-1">
@@ -665,15 +670,15 @@ function MobileHoldings({
                             )}
                           >
                             {dayPercent >= 0 ? <TrendingUp size={9} /> : <TrendingDown size={9} />}
-                            {formatPercent(dayPercent)} {zh ? "今日" : "1D"}
+                            {formatPercent(dayPercent)} {tx(locale, "1D")}
                           </span>
                         )}
                       </div>
                     </div>
                     <div className="mt-4 grid grid-cols-3 gap-2 rounded-2xl bg-[var(--surface-muted)] p-3 text-xs">
-                      <AssetFact label={zh ? "數量" : "Quantity"} value={formatQuantity(holding.quantity)} />
-                      <AssetFact label={zh ? "平均成本" : "Avg. cost"} value={holding.cost_known === false ? "N/A" : formatCurrency(holding.average_cost, holding.cost_currency)} />
-                      <AssetFact label={zh ? "配置" : "Weight"} value={`${holding.allocationPercent.toFixed(1)}%`} />
+                      <AssetFact label={tx(locale, "Quantity")} value={formatQuantity(holding.quantity)} />
+                      <AssetFact label={tx(locale, "Avg. cost")} value={holding.cost_known === false ? "N/A" : formatCurrency(holding.average_cost, holding.cost_currency)} />
+                      <AssetFact label={tx(locale, "Weight")} value={`${holding.allocationPercent.toFixed(1)}%`} />
                     </div>
                     {!demo && holding.source_kind !== "wallet" && !holding.id.startsWith("overview:") && (
                       <button
@@ -681,7 +686,7 @@ function MobileHoldings({
                         onClick={() => onDelete(holding.id)}
                         type="button"
                       >
-                        {zh ? "刪除持倉" : "Delete holding"}
+                        {tx(locale, "Delete holding")}
                       </button>
                     )}
                   </article>
@@ -733,18 +738,18 @@ function MobileCashflow({
   const buckets = getTransactionBuckets(currentMonthTransactions);
   const [expenseHistoryOpen, setExpenseHistoryOpen] = useState(false);
   const sections = [
-    { id: "transactions", label: zh ? "收入 / 支出" : "Cashflow" },
-    { id: "recurring", label: zh ? "固定 / 訂閱" : "Recurring" },
-    { id: "debts", label: zh ? "貸款 / 債務" : "Debts" },
+    { id: "transactions", label: tx(locale, "Cashflow") },
+    { id: "recurring", label: tx(locale, "Recurring") },
+    { id: "debts", label: tx(locale, "Debts") },
   ] as const;
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
-        <MobileMetric icon={<TrendingUp size={18} />} label={zh ? "本月收入" : "Monthly income"} tone="positive" value={formatBuckets(buckets.income)} />
+        <MobileMetric icon={<TrendingUp size={18} />} label={tx(locale, "Monthly income")} tone="positive" value={formatBuckets(buckets.income)} />
         <MobileMetric
           icon={<TrendingDown size={18} />}
-          label={zh ? "本月支出" : "Monthly expenses"}
+          label={tx(locale, "Monthly expenses")}
           tone="negative"
           value={formatBuckets(buckets.expense)}
           onClick={() => setExpenseHistoryOpen(true)}
@@ -774,7 +779,7 @@ function MobileCashflow({
         <>
           <button className="focus-ring primary-button flex min-h-12 w-full items-center justify-center gap-2 rounded-full font-semibold" onClick={() => onAdd("expense", selectedDate)} type="button">
             <Plus size={18} />
-            {zh ? "新增收入 / 支出" : "Add income or expense"}
+            {tx(locale, "Add income or expense")}
           </button>
           <MobileCashflowCalendar
             calendarMonth={calendarMonth}
@@ -798,7 +803,7 @@ function MobileCashflow({
         <>
           <button className="focus-ring primary-button flex min-h-12 w-full items-center justify-center gap-2 rounded-full font-semibold" onClick={onAddRecurring} type="button">
             <Plus size={18} />
-            {zh ? "新增固定支出 / 訂閱" : "Add recurring expense"}
+            {tx(locale, "Add recurring expense")}
           </button>
           <div className="space-y-3">
             {recurringExpenses.length ? recurringExpenses.map((expense) => (
@@ -807,22 +812,22 @@ function MobileCashflow({
                   <div className="min-w-0">
                     <p className="truncate font-semibold text-ink">{expense.name}</p>
                     <p className="mt-1 text-xs text-titanium">
-                      {expense.is_subscription ? (zh ? "訂閱" : "Subscription") : (zh ? "固定支出" : "Recurring expense")}
+                      {expense.is_subscription ? (tx(locale, "Subscription")) : (tx(locale, "Recurring expense"))}
                       {" · "}
-                      {expense.frequency === "monthly" ? (zh ? "每月" : "Monthly") : (zh ? "每年" : "Yearly")}
+                      {expense.frequency === "monthly" ? (tx(locale, "Monthly")) : (tx(locale, "Yearly"))}
                     </p>
                   </div>
                   <p className="shrink-0 font-semibold text-ink">{formatCurrency(expense.amount, expense.currency)}</p>
                 </div>
                 <div className="mt-4 flex items-center justify-between rounded-2xl bg-[var(--surface-muted)] px-3 py-2.5 text-xs">
                   <span className={expense.is_active ? "text-mint" : "text-titanium"}>
-                    {expense.is_active ? (zh ? "持續扣款" : "Active") : (zh ? "已停用" : "Inactive")}
+                    {expense.is_active ? (tx(locale, "Active")) : (tx(locale, "Inactive"))}
                   </span>
-                  <span className="text-titanium">{zh ? "下次" : "Next"} {formatDate(expense.next_due_date, locale)}</span>
+                  <span className="text-titanium">{tx(locale, "Next")} {formatDate(expense.next_due_date, locale)}</span>
                 </div>
               </article>
             )) : (
-              <EmptyMobileState text={zh ? "尚未新增固定支出或訂閱。" : "No recurring expenses yet."} />
+              <EmptyMobileState text={tx(locale, "No recurring expenses yet.")} />
             )}
           </div>
         </>
@@ -832,7 +837,7 @@ function MobileCashflow({
         <>
           <button className="focus-ring primary-button flex min-h-12 w-full items-center justify-center gap-2 rounded-full font-semibold" onClick={onAddDebt} type="button">
             <Plus size={18} />
-            {zh ? "新增貸款 / 債務" : "Add loan or debt"}
+            {tx(locale, "Add loan or debt")}
           </button>
           <div className="space-y-3">
             {debts.length ? debts.map((debt) => (
@@ -848,19 +853,19 @@ function MobileCashflow({
                   </div>
                 </div>
                 <div className="mt-4 grid grid-cols-2 gap-2 rounded-2xl bg-[var(--surface-muted)] p-3 text-xs">
-                  <AssetFact label={zh ? "最低付款" : "Minimum"} value={formatCurrency(debt.minimum_payment, debt.currency)} />
-                  <AssetFact label={zh ? "下次付款" : "Next payment"} value={formatDate(debt.next_payment_date, locale)} />
+                  <AssetFact label={tx(locale, "Minimum")} value={formatCurrency(debt.minimum_payment, debt.currency)} />
+                  <AssetFact label={tx(locale, "Next payment")} value={formatDate(debt.next_payment_date, locale)} />
                 </div>
               </article>
             )) : (
-              <EmptyMobileState text={zh ? "尚未新增貸款或債務。" : "No debts yet."} />
+              <EmptyMobileState text={tx(locale, "No debts yet.")} />
             )}
           </div>
         </>
       )}
 
       {expenseHistoryOpen && (
-        <MobileSheet title={zh ? "本月支出明細" : "Monthly expense details"} onClose={() => setExpenseHistoryOpen(false)}>
+        <MobileSheet title={tx(locale, "Monthly expense details")} onClose={() => setExpenseHistoryOpen(false)}>
           <div className="mb-4 flex items-end justify-between gap-3 rounded-[20px] bg-[var(--surface-muted)] p-4">
             <div>
               <p className="text-xs text-titanium">
@@ -876,7 +881,7 @@ function MobileCashflow({
             </span>
           </div>
           {!currentMonthExpenses.length ? (
-            <EmptyMobileState text={zh ? "本月尚未記錄任何支出。" : "No expenses recorded this month."} />
+            <EmptyMobileState text={tx(locale, "No expenses recorded this month.")} />
           ) : (
             <div className="divide-y divide-line">
               {currentMonthExpenses.map((transaction) => (
@@ -969,12 +974,12 @@ function MobileCashflowCalendar({
             }}
             type="button"
           >
-            {zh ? "今天" : "Today"}
+            {tx(locale, "Today")}
           </button>
-          <button aria-label={zh ? "上個月" : "Previous month"} className="focus-ring flex h-8 w-8 items-center justify-center rounded-full bg-[var(--surface-muted)] text-titanium" onClick={() => onChangeMonth(-1)} type="button">
+          <button aria-label={tx(locale, "Previous month")} className="focus-ring flex h-8 w-8 items-center justify-center rounded-full bg-[var(--surface-muted)] text-titanium" onClick={() => onChangeMonth(-1)} type="button">
             <ChevronLeft size={16} />
           </button>
-          <button aria-label={zh ? "下個月" : "Next month"} className="focus-ring flex h-8 w-8 items-center justify-center rounded-full bg-[var(--surface-muted)] text-titanium" onClick={() => onChangeMonth(1)} type="button">
+          <button aria-label={tx(locale, "Next month")} className="focus-ring flex h-8 w-8 items-center justify-center rounded-full bg-[var(--surface-muted)] text-titanium" onClick={() => onChangeMonth(1)} type="button">
             <ChevronRight size={16} />
           </button>
         </div>
@@ -1043,14 +1048,14 @@ function MobileCashflowCalendar({
       <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 border-t border-line pt-3 text-[10px] text-titanium">
         <span className="flex items-center gap-1.5">
           <span className="h-3 w-3 rounded-[5px] border border-[var(--accent)]/30 bg-[var(--accent-soft)]" />
-          {zh ? "訂閱 / 固定扣款" : "Recurring due"}
+          {tx(locale, "Recurring due")}
         </span>
         <span className="flex items-center gap-1.5">
           <span className="h-3 w-3 rounded-[5px] border border-line bg-[var(--surface-muted)]" />
-          {zh ? "貸款繳款" : "Loan due"}
+          {tx(locale, "Loan due")}
         </span>
-        <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-mint" />{zh ? "收入" : "Income"}</span>
-        <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-rose" />{zh ? "支出" : "Expense"}</span>
+        <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-mint" />{tx(locale, "Income")}</span>
+        <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-rose" />{tx(locale, "Expense")}</span>
       </div>
 
       <div className="mt-3 border-t border-line pt-4">
@@ -1063,7 +1068,7 @@ function MobileCashflowCalendar({
             type="button"
           >
             <Plus size={13} />
-            {zh ? "新增" : "Add"}
+            {tx(locale, "Add")}
           </button>
         </div>
         {(selectedSchedules.recurring.length > 0 || selectedSchedules.debts.length > 0) && (
@@ -1073,7 +1078,7 @@ function MobileCashflowCalendar({
                 <div className="min-w-0">
                   <p className="truncate text-xs font-semibold text-ink">{expense.name}</p>
                   <p className="mt-0.5 text-[10px] text-[var(--accent)]">
-                    {expense.is_subscription ? (zh ? "訂閱扣款" : "Subscription") : (zh ? "固定支出" : "Recurring bill")}
+                    {expense.is_subscription ? (tx(locale, "Subscription")) : (tx(locale, "Recurring bill"))}
                   </p>
                 </div>
                 <p className="shrink-0 text-xs font-bold text-[var(--accent)]">{formatCurrency(expense.amount, expense.currency)}</p>
@@ -1083,7 +1088,7 @@ function MobileCashflowCalendar({
               <div className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-[var(--surface-muted)] p-3" key={`debt-${debt.id}`}>
                 <div className="min-w-0">
                   <p className="truncate text-xs font-semibold text-ink">{debt.name}</p>
-                  <p className="mt-0.5 text-[10px] text-titanium">{zh ? "貸款／債務繳款" : "Loan or debt payment"}</p>
+                  <p className="mt-0.5 text-[10px] text-titanium">{tx(locale, "Loan or debt payment")}</p>
                 </div>
                 <p className="shrink-0 text-xs font-bold text-ink">{formatCurrency(debt.minimum_payment, debt.currency)}</p>
               </div>
@@ -1092,7 +1097,7 @@ function MobileCashflowCalendar({
         )}
         {!selectedTransactions.length && !selectedSchedules.recurring.length && !selectedSchedules.debts.length ? (
           <p className="mt-4 rounded-2xl bg-[var(--surface-muted)] p-4 text-center text-xs text-titanium">
-            {zh ? "這天沒有收支紀錄，點右上角＋新增。" : "No records for this day. Tap + to add one."}
+            {tx(locale, "No records for this day. Tap + to add one.")}
           </p>
         ) : selectedTransactions.length ? (
           <div className="mt-2 divide-y divide-line">
@@ -1160,7 +1165,7 @@ function MobileInsights({
   }));
   const donutRest = sorted.slice(5).reduce((sum, item) => sum + item.allocationPercent, 0);
   if (donutRest > 0.5) {
-    donutData.push({ color: "#8d99ab", name: zh ? "其他" : "Others", value: donutRest });
+    donutData.push({ color: "#8d99ab", name: tx(locale, "Others"), value: donutRest });
   }
 
   const debtPrincipalUsd = debts
@@ -1188,7 +1193,7 @@ function MobileInsights({
         <div className="pointer-events-none absolute -right-16 -top-24 h-56 w-56 rounded-full bg-[var(--accent)] opacity-[0.14] blur-3xl" />
         <div className="relative">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-titanium">{zh ? "淨資產" : "Net worth"}</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-titanium">{tx(locale, "Net worth")}</p>
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
               <CircleDollarSign size={16} />
             </span>
@@ -1198,11 +1203,11 @@ function MobileInsights({
           </p>
           <div className="mt-4 grid grid-cols-2 gap-2.5">
             <div className="rounded-2xl bg-[var(--surface-muted)] p-3">
-              <p className="text-[10px] font-medium text-titanium">{zh ? "總資產" : "Total assets"}</p>
+              <p className="text-[10px] font-medium text-titanium">{tx(locale, "Total assets")}</p>
               <p className="mt-1 truncate text-sm font-semibold text-ink">{formatCurrency(totals.totalValue)}</p>
             </div>
             <div className="rounded-2xl bg-[var(--surface-muted)] p-3">
-              <p className="text-[10px] font-medium text-titanium">{zh ? "未償負債" : "Total debt"}</p>
+              <p className="text-[10px] font-medium text-titanium">{tx(locale, "Total debt")}</p>
               <p className="mt-1 truncate text-sm font-semibold text-ink">{debtPrincipalUsd > 0 ? `-${formatCurrency(debtPrincipalUsd)}` : formatCurrency(0)}</p>
             </div>
           </div>
@@ -1211,18 +1216,18 @@ function MobileInsights({
 
       <section className="relative overflow-hidden rounded-[26px] border border-line bg-[var(--surface-raised)] p-5 shadow-[var(--shadow-soft)]">
         <div className="pointer-events-none absolute -right-14 -top-20 h-48 w-48 rounded-full bg-[var(--accent)] opacity-[0.12] blur-3xl" />
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-titanium">{zh ? "整體報酬率" : "Total return"}</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-titanium">{tx(locale, "Total return")}</p>
         <p className={clsx("mt-2 text-[2.25rem] font-semibold leading-none tracking-[-0.045em]", totals.totalReturn >= 0 ? "text-mint" : "text-rose")}>
           {formatPercent(totals.totalReturn)}
         </p>
         <p className="mt-2.5 text-xs text-titanium">
-          {zh ? "僅包含成本已知的資產。" : "Includes assets with known cost basis only."}
+          {tx(locale, "Includes assets with known cost basis only.")}
         </p>
       </section>
 
       {donutData.length > 0 && (
         <section className="rounded-[24px] border border-line bg-[var(--surface-raised)] p-4 shadow-[var(--shadow-soft)]">
-          <h2 className="text-[15px] font-semibold text-ink">{zh ? "資產配置" : "Allocation"}</h2>
+          <h2 className="text-[15px] font-semibold text-ink">{tx(locale, "Allocation")}</h2>
           <div className="relative mx-auto mt-2 h-[190px] w-full">
             <ResponsiveContainer height="100%" width="100%">
               <PieChart>
@@ -1245,7 +1250,7 @@ function MobileInsights({
               </PieChart>
             </ResponsiveContainer>
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-              <p className="text-[10px] text-titanium">{zh ? "資產數" : "Assets"}</p>
+              <p className="text-[10px] text-titanium">{tx(locale, "Assets")}</p>
               <p className="text-xl font-semibold tracking-[-0.03em] text-ink">{holdings.length}</p>
             </div>
           </div>
@@ -1271,8 +1276,8 @@ function MobileInsights({
       {expenseDonut.length > 0 && (
         <section className="rounded-[24px] border border-line bg-[var(--surface-raised)] p-4 shadow-[var(--shadow-soft)]">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-[15px] font-semibold text-ink">{zh ? "本月支出分類" : "Spending by category"}</h2>
-            <span className="text-[10px] text-titanium">{zh ? "以美元估算" : "In USD"}</span>
+            <h2 className="text-[15px] font-semibold text-ink">{tx(locale, "Spending by category")}</h2>
+            <span className="text-[10px] text-titanium">{tx(locale, "In USD")}</span>
           </div>
           <div className="relative mx-auto mt-2 h-[190px] w-full">
             <ResponsiveContainer height="100%" width="100%">
@@ -1296,7 +1301,7 @@ function MobileInsights({
               </PieChart>
             </ResponsiveContainer>
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-              <p className="text-[10px] text-titanium">{zh ? "本月支出" : "This month"}</p>
+              <p className="text-[10px] text-titanium">{tx(locale, "This month")}</p>
               <p className="text-lg font-semibold tracking-[-0.03em] text-ink">{formatCurrency(expenseTotal)}</p>
             </div>
           </div>
@@ -1322,7 +1327,7 @@ function MobileInsights({
       {activeRecurring.length > 0 && (
         <section className="relative overflow-hidden rounded-[24px] border border-line bg-[var(--surface-raised)] p-4 shadow-[var(--shadow-soft)]">
           <div className="pointer-events-none absolute -right-12 -top-16 h-36 w-36 rounded-full bg-[var(--accent)] opacity-[0.1] blur-3xl" />
-          <p className="text-[11px] font-medium text-titanium">{zh ? "訂閱與固定支出年度成本" : "Annual recurring cost"}</p>
+          <p className="text-[11px] font-medium text-titanium">{tx(locale, "Annual recurring cost")}</p>
           <p className="mt-1.5 text-2xl font-semibold tracking-[-0.04em] text-ink">{formatCurrency(annualRecurringUsd)}</p>
           <p className="mt-1 text-xs text-titanium">
             {zh
@@ -1333,8 +1338,8 @@ function MobileInsights({
       )}
 
       <div className="grid grid-cols-2 gap-3">
-        <PerformanceCard holding={best} label={zh ? "表現最佳" : "Best performer"} positive />
-        <PerformanceCard holding={worst} label={zh ? "表現最差" : "Worst performer"} />
+        <PerformanceCard holding={best} label={tx(locale, "Best performer")} positive />
+        <PerformanceCard holding={worst} label={tx(locale, "Worst performer")} />
       </div>
     </div>
   );
@@ -1418,14 +1423,14 @@ function MobileHealthSection({
 
   const mood: PetMood = score >= 85 ? "thriving" : score >= 70 ? "happy" : score >= 50 ? "okay" : score >= 30 ? "tired" : "sick";
   const title = score >= 85
-    ? (zh ? "理財大師" : "Money master")
+    ? (tx(locale, "Money master"))
     : score >= 70
-      ? (zh ? "穩健夥伴" : "Steady saver")
+      ? (tx(locale, "Steady saver"))
       : score >= 50
-        ? (zh ? "還在努力" : "Working on it")
+        ? (tx(locale, "Working on it"))
         : score >= 30
-          ? (zh ? "有點吃緊" : "Feeling tight")
-          : (zh ? "需要急救" : "Needs rescue");
+          ? (tx(locale, "Feeling tight"))
+          : (tx(locale, "Needs rescue"));
   const ringColor = score >= 70 ? "#34b27b" : score >= 50 ? "#d99a3d" : "#e05d5d";
 
   const [previousScore, setPreviousScore] = useState<number | null>(null);
@@ -1462,7 +1467,7 @@ function MobileHealthSection({
         <div className="relative">
           <div className="flex items-center justify-between gap-2">
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-titanium">
-              {zh ? "財務健康" : "Financial health"}
+              {tx(locale, "Financial health")}
             </p>
             <span
               className="rounded-full px-2.5 py-1 text-[11px] font-bold"
@@ -1474,7 +1479,7 @@ function MobileHealthSection({
 
           <div className="mt-4 flex items-center gap-4">
             <button
-              aria-label={zh ? "跟寵物說話" : "Talk to your pet"}
+              aria-label={tx(locale, "Talk to your pet")}
               className="focus-ring relative h-[124px] w-[124px] shrink-0 rounded-full"
               onClick={() => setMessageIndex((index) => index + 1)}
               type="button"
@@ -1513,7 +1518,7 @@ function MobileHealthSection({
                 </span>
               )}
               <p className="mt-2 text-[10px] leading-4 text-titanium">
-                {zh ? "點寵物聽牠說話。這是管理提醒，不是投資建議。" : "Tap the pet to hear more. A planning aid, not investment advice."}
+                {tx(locale, "Tap the pet to hear more. A planning aid, not investment advice.")}
               </p>
             </div>
           </div>
@@ -1528,7 +1533,7 @@ function MobileHealthSection({
               <span className="block text-xs leading-5 text-ink">{message}</span>
               {messages.length > 1 && (
                 <span className="mt-1.5 block text-[9px] text-titanium">
-                  {messageIndex % messages.length + 1} / {messages.length} · {zh ? "點一下看下一則" : "Tap for next"}
+                  {messageIndex % messages.length + 1} / {messages.length} · {tx(locale, "Tap for next")}
                 </span>
               )}
             </button>
@@ -1536,22 +1541,22 @@ function MobileHealthSection({
 
           <div className="mt-4 grid grid-cols-2 gap-2.5">
             <HealthStat
-              label={zh ? "淨資產" : "Net worth"}
+              label={tx(locale, "Net worth")}
               status={netWorthUsd >= 0 ? "good" : "bad"}
               value={formatCurrency(netWorthUsd)}
             />
             <HealthStat
-              label={zh ? "本月儲蓄率" : "Savings rate"}
+              label={tx(locale, "Savings rate")}
               status={savingsRate === null ? "na" : savingsRate >= 20 ? "good" : savingsRate >= 10 ? "warn" : "bad"}
               value={formatHealthRatio(savingsRate)}
             />
             <HealthStat
-              label={zh ? "固定支出壓力" : "Fixed pressure"}
+              label={tx(locale, "Fixed pressure")}
               status={fixedPressure === null ? "na" : fixedPressure <= 50 ? "good" : fixedPressure <= 70 ? "warn" : "bad"}
               value={formatHealthRatio(fixedPressure)}
             />
             <HealthStat
-              label={zh ? "負債收入比" : "Debt-to-income"}
+              label={tx(locale, "Debt-to-income")}
               status={debtIncomeRatio === null ? "na" : debtIncomeRatio <= 20 ? "good" : debtIncomeRatio <= 36 ? "warn" : "bad"}
               value={formatHealthRatio(debtIncomeRatio)}
             />
@@ -1564,7 +1569,7 @@ function MobileHealthSection({
           <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
             <Sparkles size={14} />
           </span>
-          <h2 className="text-[15px] font-semibold text-ink">{zh ? "幫寵物加分" : "Heal your pet"}</h2>
+          <h2 className="text-[15px] font-semibold text-ink">{tx(locale, "Heal your pet")}</h2>
         </div>
         {quests.length ? (
           <div className="mt-2 divide-y divide-line">
@@ -1579,7 +1584,7 @@ function MobileHealthSection({
           </div>
         ) : (
           <p className="mt-3 rounded-2xl bg-[var(--surface-muted)] p-4 text-center text-xs leading-5 text-titanium">
-            {zh ? "目前沒有待辦任務，寵物狀態絕佳！" : "No quests right now — your pet is in great shape!"}
+            {tx(locale, "No quests right now — your pet is in great shape!")}
           </p>
         )}
       </section>
@@ -1688,7 +1693,7 @@ function buildExpenseCategoryDonut(transactions: CashflowTransaction[], twdToUsd
   const categoryLabel = (id: string) => {
     const match = expenseCategories.find((category) => category.id === id);
     if (match) return zh ? match.zh : match.en;
-    return id || (zh ? "其他" : "Other");
+    return id || (tx(locale, "Other"));
   };
 
   const totals = new Map<string, number>();
@@ -1713,7 +1718,7 @@ function buildExpenseCategoryDonut(transactions: CashflowTransaction[], twdToUsd
     value: entry.value,
   }));
   if (restValue > 0) {
-    result.push({ color: "#8d99ab", name: zh ? "其他" : "Others", value: restValue });
+    result.push({ color: "#8d99ab", name: tx(locale, "Others"), value: restValue });
   }
   return result;
 }
@@ -1739,45 +1744,45 @@ function MobileMore({
   return (
     <div className="space-y-4">
       <section className="rounded-[24px] border border-line bg-[var(--surface-raised)] p-4 shadow-[var(--shadow-soft)]">
-        <h2 className="text-sm font-semibold text-ink">{zh ? "顯示設定" : "Display"}</h2>
+        <h2 className="text-sm font-semibold text-ink">{tx(locale, "Display")}</h2>
         <div className="mt-4 flex items-center justify-between gap-3">
-          <span className="text-sm text-titanium">{zh ? "資產名稱" : "Portfolio name"}</span>
+          <span className="text-sm text-titanium">{tx(locale, "Portfolio name")}</span>
           <button
             className="focus-ring flex items-center gap-1.5 rounded-full border border-line bg-[var(--surface-muted)] px-3 py-2 text-xs font-semibold text-ink"
             onClick={onEditName}
             type="button"
           >
-            {portfolioName ? (zh ? `${portfolioName}的資產` : `${portfolioName}'s assets`) : (zh ? "未設定" : "Not set")}
+            {portfolioName ? (zh ? `${portfolioName}的資產` : `${portfolioName}'s assets`) : (tx(locale, "Not set"))}
             <Pencil className="text-titanium" size={12} />
           </button>
         </div>
         <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-4">
-          <span className="text-sm text-titanium">{zh ? "主題" : "Theme"}</span>
-          <ThemeToggle compact />
+          <span className="text-sm text-titanium">{tx(locale, "Theme")}</span>
+          <ThemeToggle compact locale={locale} />
         </div>
         <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-4">
-          <span className="text-sm text-titanium">{zh ? "語言" : "Language"}</span>
-          <div className="flex rounded-full border border-line bg-[var(--surface-muted)] p-1">
-            {(["zh", "en"] as Locale[]).map((item) => (
+          <span className="text-sm text-titanium">{tx(locale, "Language")}</span>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {localeOrder.map((item) => (
               <button
-                className={clsx("rounded-full px-3 py-2 text-xs font-semibold", locale === item ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "text-titanium")}
+                className={clsx("focus-ring rounded-2xl border border-line px-3 py-2 text-sm font-semibold", locale === item ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "text-titanium")}
                 key={item}
                 onClick={() => onLocaleChange(item)}
                 type="button"
               >
-                {item === "zh" ? "中文" : "EN"}
+                {localeNames[item]}
               </button>
             ))}
           </div>
         </div>
       </section>
       <section className="rounded-[24px] border border-line bg-[var(--surface-raised)] p-4 shadow-[var(--shadow-soft)]">
-        <p className="text-xs text-titanium">{demo ? "Demo mode" : zh ? "已登入" : "Signed in"}</p>
-        <p className="mt-1 truncate text-sm font-medium text-ink">{demo ? (zh ? "唯讀範例資料" : "Read-only sample data") : userEmail}</p>
+        <p className="text-xs text-titanium">{demo ? "Demo mode" : tx(locale, "Signed in")}</p>
+        <p className="mt-1 truncate text-sm font-medium text-ink">{demo ? (tx(locale, "Read-only sample data")) : userEmail}</p>
         {!demo && (
           <button className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border border-rose/20 bg-rose/10 text-sm font-semibold text-rose" onClick={onSignOut} type="button">
             <LogOut size={17} />
-            {zh ? "登出" : "Sign out"}
+            {tx(locale, "Sign out")}
           </button>
         )}
       </section>
@@ -1806,10 +1811,9 @@ function MobileHoldingSheet({
   onSave: (event: React.FormEvent<HTMLFormElement>) => void;
   onUpdate: <K extends keyof HoldingInput>(key: K, value: HoldingInput[K]) => void;
 }) {
-  const zh = locale === "zh";
   const [mode, setMode] = useState<"manual" | "wallet">("manual");
   return (
-    <MobileSheet title={editing ? (zh ? "編輯持倉" : "Edit holding") : (zh ? "新增持倉" : "Add holding")} onClose={onClose}>
+    <MobileSheet title={editing ? (tx(locale, "Edit holding")) : (tx(locale, "Add holding"))} onClose={onClose}>
       {!editing && (
         <div className="mb-5 grid grid-cols-2 gap-1 rounded-full border border-line bg-[var(--surface-muted)] p-1">
           <button
@@ -1823,7 +1827,7 @@ function MobileHoldingSheet({
             onClick={() => setMode("manual")}
             type="button"
           >
-            {zh ? "手動新增" : "Manual"}
+            {tx(locale, "Manual")}
           </button>
           <button
             aria-pressed={mode === "wallet"}
@@ -1836,7 +1840,7 @@ function MobileHoldingSheet({
             onClick={() => setMode("wallet")}
             type="button"
           >
-            {zh ? "地址追蹤" : "Address tracking"}
+            {tx(locale, "Address tracking")}
           </button>
         </div>
       )}
@@ -1850,36 +1854,36 @@ function MobileHoldingSheet({
         />
       ) : (
       <form className="space-y-4" onSubmit={onSave}>
-        <MobileField label={zh ? "資產類型" : "Asset type"}>
+        <MobileField label={tx(locale, "Asset type")}>
           <select className="input-control w-full px-3" value={form.asset_type} onChange={(event) => onUpdate("asset_type", event.target.value as AssetType)}>
-            <option value="us_stock">{zh ? "美股" : "US stock"}</option>
-            <option value="tw_stock">{zh ? "台股" : "Taiwan stock"}</option>
-            <option value="crypto">{zh ? "加密貨幣" : "Crypto"}</option>
-            <option value="cash">{zh ? "現金" : "Cash"}</option>
+            <option value="us_stock">{tx(locale, "US stock")}</option>
+            <option value="tw_stock">{tx(locale, "Taiwan stock")}</option>
+            <option value="crypto">{tx(locale, "Crypto")}</option>
+            <option value="cash">{tx(locale, "Cash")}</option>
           </select>
         </MobileField>
         <div className="grid grid-cols-2 gap-3">
-          <MobileField label={zh ? "代號" : "Symbol"}>
+          <MobileField label={tx(locale, "Symbol")}>
             <input className="input-control w-full px-3 uppercase" value={form.symbol} onChange={(event) => onUpdate("symbol", event.target.value)} required />
           </MobileField>
-          <MobileField label={zh ? "幣別" : "Currency"}>
+          <MobileField label={tx(locale, "Currency")}>
             <select className="input-control w-full px-3" value={form.cost_currency} onChange={(event) => onUpdate("cost_currency", event.target.value as Currency)}>
               <option value="USD">USD</option>
               <option value="TWD">TWD</option>
             </select>
           </MobileField>
         </div>
-        <MobileField label={zh ? "名稱" : "Name"}>
+        <MobileField label={tx(locale, "Name")}>
           <input className="input-control w-full px-3" value={form.name} onChange={(event) => onUpdate("name", event.target.value)} />
         </MobileField>
         <div className="grid grid-cols-2 gap-3">
-          <MobileField label={form.asset_type === "tw_stock" ? (zh ? "張數" : "Lots") : (zh ? "數量" : "Quantity")}>
+          <MobileField label={form.asset_type === "tw_stock" ? (tx(locale, "Lots")) : (tx(locale, "Quantity"))}>
             <input className="input-control w-full px-3" inputMode="decimal" type="text" value={form.quantity} onChange={(event) => {
               const next = cleanNumber(event.target.value);
               if (next !== null) onUpdate("quantity", next);
             }} />
           </MobileField>
-          <MobileField label={zh ? "平均成本" : "Average cost"}>
+          <MobileField label={tx(locale, "Average cost")}>
             <input className="input-control w-full px-3" inputMode="decimal" type="text" value={form.average_cost} onChange={(event) => {
               const next = cleanNumber(event.target.value);
               if (next !== null) onUpdate("average_cost", next);
@@ -1888,10 +1892,10 @@ function MobileHoldingSheet({
         </div>
         <label className="flex min-h-12 items-center gap-3 rounded-2xl border border-line bg-[var(--surface-muted)] px-4 text-sm text-ink">
           <input checked={form.cost_known !== false} onChange={(event) => onUpdate("cost_known", event.target.checked)} type="checkbox" />
-          {zh ? "成本已知" : "Cost basis known"}
+          {tx(locale, "Cost basis known")}
         </label>
         <button className="primary-button min-h-12 w-full rounded-full font-semibold" type="submit">
-          {editing ? (zh ? "儲存變更" : "Save changes") : (zh ? "新增持倉" : "Add holding")}
+          {editing ? (tx(locale, "Save changes")) : (tx(locale, "Add holding"))}
         </button>
       </form>
       )}
@@ -1912,10 +1916,9 @@ function MobileCashflowSheet({
   onSave: (event: React.FormEvent<HTMLFormElement>) => void;
   onUpdate: <K extends keyof CashflowTransactionInput>(key: K, value: CashflowTransactionInput[K]) => void;
 }) {
-  const zh = locale === "zh";
   const categories = form.transaction_type === "income" ? incomeCategories : expenseCategories;
   return (
-    <MobileSheet title={form.transaction_type === "income" ? (zh ? "新增收入" : "Add income") : (zh ? "新增支出" : "Add expense")} onClose={onClose}>
+    <MobileSheet title={form.transaction_type === "income" ? (tx(locale, "Add income")) : (tx(locale, "Add expense"))} onClose={onClose}>
       <form className="space-y-4" onSubmit={onSave}>
         <div className="grid grid-cols-2 gap-1 rounded-full border border-line bg-[var(--surface-muted)] p-1">
           {(["expense", "income"] as CashflowType[]).map((type) => (
@@ -1925,45 +1928,45 @@ function MobileCashflowSheet({
               onClick={() => onUpdate("transaction_type", type)}
               type="button"
             >
-              {type === "expense" ? (zh ? "支出" : "Expense") : (zh ? "收入" : "Income")}
+              {type === "expense" ? (tx(locale, "Expense")) : (tx(locale, "Income"))}
             </button>
           ))}
         </div>
         <div className="grid grid-cols-[1fr_92px] gap-3">
-          <MobileField label={zh ? "金額" : "Amount"}>
+          <MobileField label={tx(locale, "Amount")}>
             <input className="input-control w-full px-3 text-xl font-semibold" inputMode="decimal" type="text" value={form.amount} onChange={(event) => {
               const next = cleanNumber(event.target.value);
               if (next !== null) onUpdate("amount", next);
             }} />
           </MobileField>
-          <MobileField label={zh ? "幣別" : "Currency"}>
+          <MobileField label={tx(locale, "Currency")}>
             <select className="input-control w-full px-3" value={form.currency} onChange={(event) => onUpdate("currency", event.target.value as Currency)}>
               <option value="USD">USD</option>
               <option value="TWD">TWD</option>
             </select>
           </MobileField>
         </div>
-        <MobileField label={zh ? "分類" : "Category"}>
+        <MobileField label={tx(locale, "Category")}>
           <select className="input-control w-full px-3" value={form.category} onChange={(event) => onUpdate("category", event.target.value)}>
-            {categories.map((category) => <option key={category.id} value={category.id}>{category[locale]}</option>)}
+            {categories.map((category) => <option key={category.id} value={category.id}>{tx(locale, category.en)}</option>)}
           </select>
         </MobileField>
-        <MobileField label={zh ? "項目名稱" : "Description"}>
+        <MobileField label={tx(locale, "Description")}>
           <input className="input-control w-full px-3" value={form.description} onChange={(event) => onUpdate("description", event.target.value)} />
         </MobileField>
-        <MobileField label={zh ? "日期" : "Date"}>
+        <MobileField label={tx(locale, "Date")}>
           <input className="input-control w-full px-3" type="date" value={form.transaction_date} onChange={(event) => onUpdate("transaction_date", event.target.value)} />
         </MobileField>
-        <MobileField label={zh ? "付款方式" : "Payment method"}>
+        <MobileField label={tx(locale, "Payment method")}>
           <select className="input-control w-full px-3" value={form.payment_method} onChange={(event) => onUpdate("payment_method", event.target.value)}>
-            <option value="">{zh ? "未設定" : "Not set"}</option>
-            <option value="Credit card">{zh ? "信用卡" : "Credit card"}</option>
-            <option value="Cash">{zh ? "現金" : "Cash"}</option>
-            <option value="Transfer">{zh ? "轉帳" : "Bank transfer"}</option>
+            <option value="">{tx(locale, "Not set")}</option>
+            <option value="Credit card">{tx(locale, "Credit card")}</option>
+            <option value="Cash">{tx(locale, "Cash")}</option>
+            <option value="Transfer">{tx(locale, "Bank transfer")}</option>
           </select>
         </MobileField>
         <button className="primary-button min-h-12 w-full rounded-full font-semibold" type="submit">
-          {zh ? "儲存紀錄" : "Save transaction"}
+          {tx(locale, "Save transaction")}
         </button>
       </form>
     </MobileSheet>
@@ -1986,21 +1989,20 @@ function MobileRecurringSheet({
     value: RecurringExpenseInput[K],
   ) => void;
 }) {
-  const zh = locale === "zh";
   return (
-    <MobileSheet title={zh ? "新增固定支出 / 訂閱" : "Add recurring expense"} onClose={onClose}>
+    <MobileSheet title={tx(locale, "Add recurring expense")} onClose={onClose}>
       <form className="space-y-4" onSubmit={onSave}>
-        <MobileField label={zh ? "名稱" : "Name"}>
+        <MobileField label={tx(locale, "Name")}>
           <input className="input-control w-full px-3" value={form.name} onChange={(event) => onUpdate("name", event.target.value)} required />
         </MobileField>
         <div className="grid grid-cols-[1fr_92px] gap-3">
-          <MobileField label={zh ? "金額" : "Amount"}>
+          <MobileField label={tx(locale, "Amount")}>
             <input className="input-control w-full px-3 text-lg font-semibold" inputMode="decimal" type="text" value={form.amount} onChange={(event) => {
               const next = cleanNumber(event.target.value);
               if (next !== null) onUpdate("amount", next);
             }} />
           </MobileField>
-          <MobileField label={zh ? "幣別" : "Currency"}>
+          <MobileField label={tx(locale, "Currency")}>
             <select className="input-control w-full px-3" value={form.currency} onChange={(event) => onUpdate("currency", event.target.value as Currency)}>
               <option value="USD">USD</option>
               <option value="TWD">TWD</option>
@@ -2008,45 +2010,45 @@ function MobileRecurringSheet({
           </MobileField>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <MobileField label={zh ? "週期" : "Frequency"}>
+          <MobileField label={tx(locale, "Frequency")}>
             <select className="input-control w-full px-3" value={form.frequency} onChange={(event) => onUpdate("frequency", event.target.value as RecurringExpenseInput["frequency"])}>
-              <option value="monthly">{zh ? "每月" : "Monthly"}</option>
-              <option value="yearly">{zh ? "每年" : "Yearly"}</option>
+              <option value="monthly">{tx(locale, "Monthly")}</option>
+              <option value="yearly">{tx(locale, "Yearly")}</option>
             </select>
           </MobileField>
-          <MobileField label={zh ? "下次扣款" : "Next due"}>
+          <MobileField label={tx(locale, "Next due")}>
             <input className="input-control w-full px-2" type="date" value={form.next_due_date} onChange={(event) => onUpdate("next_due_date", event.target.value)} required />
           </MobileField>
         </div>
-        <MobileField label={zh ? "分類" : "Category"}>
+        <MobileField label={tx(locale, "Category")}>
           <select className="input-control w-full px-3" value={form.category} onChange={(event) => onUpdate("category", event.target.value)}>
-            <option value="subscription">{zh ? "訂閱" : "Subscription"}</option>
-            <option value="rent">{zh ? "房租" : "Rent"}</option>
-            <option value="insurance">{zh ? "保險" : "Insurance"}</option>
-            <option value="utilities">{zh ? "水電網路" : "Utilities"}</option>
-            <option value="phone">{zh ? "手機費" : "Phone"}</option>
-            <option value="membership">{zh ? "會員費" : "Membership"}</option>
-            <option value="other_recurring">{zh ? "其他固定支出" : "Other"}</option>
+            <option value="subscription">{tx(locale, "Subscription")}</option>
+            <option value="rent">{tx(locale, "Rent")}</option>
+            <option value="insurance">{tx(locale, "Insurance")}</option>
+            <option value="utilities">{tx(locale, "Utilities")}</option>
+            <option value="phone">{tx(locale, "Phone")}</option>
+            <option value="membership">{tx(locale, "Membership")}</option>
+            <option value="other_recurring">{tx(locale, "Other")}</option>
           </select>
         </MobileField>
-        <MobileField label={zh ? "付款方式" : "Payment method"}>
+        <MobileField label={tx(locale, "Payment method")}>
           <select className="input-control w-full px-3" value={form.payment_method} onChange={(event) => onUpdate("payment_method", event.target.value)}>
-            <option value="">{zh ? "未設定" : "Not set"}</option>
-            <option value="Credit card">{zh ? "信用卡" : "Credit card"}</option>
-            <option value="Transfer">{zh ? "銀行扣款 / 轉帳" : "Bank transfer"}</option>
-            <option value="Cash">{zh ? "現金" : "Cash"}</option>
+            <option value="">{tx(locale, "Not set")}</option>
+            <option value="Credit card">{tx(locale, "Credit card")}</option>
+            <option value="Transfer">{tx(locale, "Bank transfer")}</option>
+            <option value="Cash">{tx(locale, "Cash")}</option>
           </select>
         </MobileField>
         <label className="flex min-h-12 items-center gap-3 rounded-2xl border border-line bg-[var(--surface-muted)] px-4 text-sm text-ink">
           <input checked={form.is_subscription} onChange={(event) => onUpdate("is_subscription", event.target.checked)} type="checkbox" />
-          {zh ? "這是一項訂閱服務" : "This is a subscription"}
+          {tx(locale, "This is a subscription")}
         </label>
         <label className="flex min-h-12 items-center gap-3 rounded-2xl border border-line bg-[var(--surface-muted)] px-4 text-sm text-ink">
           <input checked={form.is_active} onChange={(event) => onUpdate("is_active", event.target.checked)} type="checkbox" />
-          {zh ? "持續扣款中" : "Active recurring payment"}
+          {tx(locale, "Active recurring payment")}
         </label>
         <button className="primary-button min-h-12 w-full rounded-full font-semibold" type="submit">
-          {zh ? "儲存固定支出" : "Save recurring expense"}
+          {tx(locale, "Save recurring expense")}
         </button>
       </form>
     </MobileSheet>
@@ -2066,45 +2068,44 @@ function MobileDebtSheet({
   onSave: (event: React.FormEvent<HTMLFormElement>) => void;
   onUpdate: <K extends keyof DebtInput>(key: K, value: DebtInput[K]) => void;
 }) {
-  const zh = locale === "zh";
   const debtTypes: DebtType[] = ["mortgage", "car_loan", "student_loan", "credit_card", "personal_loan", "other"];
   return (
-    <MobileSheet title={zh ? "新增貸款 / 債務" : "Add loan or debt"} onClose={onClose}>
+    <MobileSheet title={tx(locale, "Add loan or debt")} onClose={onClose}>
       <form className="space-y-4" onSubmit={onSave}>
-        <MobileField label={zh ? "名稱" : "Name"}>
+        <MobileField label={tx(locale, "Name")}>
           <input className="input-control w-full px-3" value={form.name} onChange={(event) => onUpdate("name", event.target.value)} required />
         </MobileField>
         <div className="grid grid-cols-[1fr_92px] gap-3">
-          <MobileField label={zh ? "類型" : "Debt type"}>
+          <MobileField label={tx(locale, "Debt type")}>
             <select className="input-control w-full px-3" value={form.debt_type} onChange={(event) => onUpdate("debt_type", event.target.value as DebtType)}>
               {debtTypes.map((type) => <option key={type} value={type}>{debtTypeLabel(type, locale)}</option>)}
             </select>
           </MobileField>
-          <MobileField label={zh ? "幣別" : "Currency"}>
+          <MobileField label={tx(locale, "Currency")}>
             <select className="input-control w-full px-3" value={form.currency} onChange={(event) => onUpdate("currency", event.target.value as Currency)}>
               <option value="USD">USD</option>
               <option value="TWD">TWD</option>
             </select>
           </MobileField>
         </div>
-        <MobileField label={zh ? "貸款機構 / 債權人" : "Lender"}>
+        <MobileField label={tx(locale, "Lender")}>
           <input className="input-control w-full px-3" value={form.lender} onChange={(event) => onUpdate("lender", event.target.value)} />
         </MobileField>
         <div className="grid grid-cols-2 gap-3">
-          <MobileNumericField label={zh ? "原始本金" : "Original principal"} value={form.original_principal} onChange={(value) => onUpdate("original_principal", value)} />
-          <MobileNumericField label={zh ? "剩餘本金" : "Remaining balance"} value={form.remaining_principal} onChange={(value) => onUpdate("remaining_principal", value)} />
-          <MobileNumericField label={zh ? "年利率 %" : "APR %"} value={form.interest_rate} onChange={(value) => onUpdate("interest_rate", value)} />
-          <MobileNumericField label={zh ? "每月最低付款" : "Minimum payment"} value={form.minimum_payment} onChange={(value) => onUpdate("minimum_payment", value)} />
+          <MobileNumericField label={tx(locale, "Original principal")} value={form.original_principal} onChange={(value) => onUpdate("original_principal", value)} />
+          <MobileNumericField label={tx(locale, "Remaining balance")} value={form.remaining_principal} onChange={(value) => onUpdate("remaining_principal", value)} />
+          <MobileNumericField label={tx(locale, "APR %")} value={form.interest_rate} onChange={(value) => onUpdate("interest_rate", value)} />
+          <MobileNumericField label={tx(locale, "Minimum payment")} value={form.minimum_payment} onChange={(value) => onUpdate("minimum_payment", value)} />
         </div>
-        <MobileField label={zh ? "下次付款日" : "Next payment"}>
+        <MobileField label={tx(locale, "Next payment")}>
           <input className="input-control w-full px-3" type="date" value={form.next_payment_date} onChange={(event) => onUpdate("next_payment_date", event.target.value)} required />
         </MobileField>
         <label className="flex min-h-12 items-center gap-3 rounded-2xl border border-line bg-[var(--surface-muted)] px-4 text-sm text-ink">
           <input checked={form.is_active} onChange={(event) => onUpdate("is_active", event.target.checked)} type="checkbox" />
-          {zh ? "仍在償還中" : "Active debt"}
+          {tx(locale, "Active debt")}
         </label>
         <button className="primary-button min-h-12 w-full rounded-full font-semibold" type="submit">
-          {zh ? "儲存貸款 / 債務" : "Save debt"}
+          {tx(locale, "Save debt")}
         </button>
       </form>
     </MobileSheet>
@@ -2125,7 +2126,7 @@ function MobileNameSheet({
   const zh = locale === "zh";
   const [value, setValue] = useState(portfolioName);
   return (
-    <MobileSheet title={zh ? "幫你的資產取個名字" : "Name your portfolio"} onClose={onClose}>
+    <MobileSheet title={tx(locale, "Name your portfolio")} onClose={onClose}>
       <form
         className="space-y-4"
         onSubmit={(event) => {
@@ -2133,12 +2134,12 @@ function MobileNameSheet({
           onSave(value);
         }}
       >
-        <MobileField label={zh ? "名字（最多 12 個字）" : "Name (up to 12 characters)"}>
+        <MobileField label={tx(locale, "Name (up to 12 characters)")}>
           <input
             autoFocus
             className="input-control w-full px-3"
             maxLength={12}
-            placeholder={zh ? "例如：小明" : "e.g. Max"}
+            placeholder={tx(locale, "e.g. Max")}
             value={value}
             onChange={(event) => setValue(event.target.value)}
           />
@@ -2149,10 +2150,10 @@ function MobileNameSheet({
           </p>
         )}
         <p className="text-xs leading-5 text-titanium">
-          {zh ? "清空並儲存可恢復預設的「我的財務」。" : "Save with an empty name to restore the default title."}
+          {tx(locale, "Save with an empty name to restore the default title.")}
         </p>
         <button className="primary-button min-h-12 w-full rounded-full font-semibold" type="submit">
-          {zh ? "儲存名字" : "Save name"}
+          {tx(locale, "Save name")}
         </button>
       </form>
     </MobileSheet>
@@ -2193,13 +2194,12 @@ function MobileBottomNav({
   locale: Locale;
   onSelect: (tab: MobileTab) => void;
 }) {
-  const zh = locale === "zh";
   const items: Array<{ icon: React.ReactNode; id: MobileTab; label: string }> = [
-    { id: "home", icon: <LayoutDashboard size={19} />, label: zh ? "首頁" : "Home" },
-    { id: "holdings", icon: <WalletCards size={19} />, label: zh ? "持倉" : "Holdings" },
-    { id: "cashflow", icon: <ReceiptText size={19} />, label: zh ? "記帳" : "Cashflow" },
-    { id: "insights", icon: <BarChart3 size={19} />, label: zh ? "分析" : "Insights" },
-    { id: "more", icon: <Ellipsis size={20} />, label: zh ? "更多" : "More" },
+    { id: "home", icon: <LayoutDashboard size={19} />, label: tx(locale, "Home") },
+    { id: "holdings", icon: <WalletCards size={19} />, label: tx(locale, "Holdings") },
+    { id: "cashflow", icon: <ReceiptText size={19} />, label: tx(locale, "Cashflow") },
+    { id: "insights", icon: <BarChart3 size={19} />, label: tx(locale, "Insights") },
+    { id: "more", icon: <Ellipsis size={20} />, label: tx(locale, "More") },
   ];
   return (
     <nav className="fixed inset-x-0 bottom-0 z-50 px-3 pb-[max(0.6rem,env(safe-area-inset-bottom))]">
@@ -2312,7 +2312,7 @@ function MobileAssetRow({ holding, locale }: { holding: EnrichedHolding; locale:
       <div className="shrink-0 text-right">
         <p className="text-sm font-semibold text-ink">{formatCurrency(holding.valueUsd)}</p>
         <p className={clsx("mt-0.5 text-xs font-medium", holding.cost_known === false ? "text-titanium" : holding.gainUsd >= 0 ? "text-mint" : "text-rose")}>
-          {holding.cost_known === false ? (locale === "zh" ? "成本未知" : "Unknown cost") : formatPercent(holding.gainPercent)}
+          {holding.cost_known === false ? (tx(locale, "Unknown cost")) : formatPercent(holding.gainPercent)}
         </p>
       </div>
     </div>
@@ -2435,15 +2435,15 @@ function EmptyMobileState({ text }: { text: string }) {
 }
 
 function debtTypeLabel(type: DebtType, locale: Locale) {
-  const labels: Record<DebtType, { zh: string; en: string }> = {
-    mortgage: { zh: "房貸", en: "Mortgage" },
-    car_loan: { zh: "車貸", en: "Car loan" },
-    student_loan: { zh: "學貸", en: "Student loan" },
-    credit_card: { zh: "信用卡", en: "Credit card" },
-    personal_loan: { zh: "私人借款", en: "Personal loan" },
-    other: { zh: "其他", en: "Other" },
+  const labels: Record<DebtType, string> = {
+    mortgage: "Mortgage",
+    car_loan: "Car loan",
+    student_loan: "Student loan",
+    credit_card: "Credit card",
+    personal_loan: "Personal loan",
+    other: "Other",
   };
-  return labels[type][locale];
+  return tx(locale, labels[type]);
 }
 
 function getTransactionBuckets(transactions: CashflowTransaction[]) {

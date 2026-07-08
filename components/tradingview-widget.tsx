@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import type { EnrichedHolding } from "@/lib/types";
+import { tradingViewLocale, tx } from "@/lib/i18n";
+import type { EnrichedHolding, Locale } from "@/lib/types";
 
 export function toTradingViewSymbol(holding: EnrichedHolding) {
   const symbol = holding.symbol.toUpperCase();
@@ -44,7 +45,7 @@ export function TradingViewWidget({
   theme,
 }: {
   height?: number;
-  locale: "en" | "zh";
+  locale: Locale;
   symbol: string | null;
   theme: "dark" | "light";
 }) {
@@ -67,7 +68,7 @@ export function TradingViewWidget({
       calendar: false,
       hide_side_toolbar: false,
       interval: "D",
-      locale: locale === "zh" ? "zh_TW" : "en",
+      locale: tradingViewLocale[locale],
       save_image: false,
       style: "1",
       symbol,
@@ -85,7 +86,7 @@ export function TradingViewWidget({
   if (!symbol) {
     return (
       <div className="subtle-panel apple-card-sm flex items-center justify-center text-center text-sm text-titanium" style={{ height }}>
-        {locale === "zh" ? "這個資產暫無可用的 TradingView 圖表符號。" : "No TradingView symbol is available for this asset yet."}
+        {tx(locale, "No TradingView symbol is available for this asset yet.")}
       </div>
     );
   }

@@ -6,6 +6,7 @@ import { CheckCircle2, ChevronDown, Cpu, Link2, Plus, Smartphone } from "lucide-
 import clsx from "clsx";
 import { isWalletConnectConfigured } from "@/lib/appkit";
 import type { Locale, WalletChain } from "@/lib/types";
+import { tx } from "@/lib/i18n";
 
 type ConnectableChain = Exclude<WalletChain, "cardano">;
 type WalletKind = "hardware" | "hot";
@@ -85,14 +86,12 @@ const walletOptions: Record<WalletKind, WalletOption[]> = {
 };
 
 export function WalletConnect({ locale, onUseAddress }: { locale: Locale; onUseAddress: (value: ConnectedAddress) => void }) {
-  const zh = locale === "zh";
-
   if (!isWalletConnectConfigured) {
     return (
       <div className="apple-card-sm border border-amber/30 bg-amber/5 p-4">
-        <p className="font-medium text-ink">{zh ? "錢包連接尚未啟用" : "Wallet connection is not configured"}</p>
+        <p className="font-medium text-ink">{tx(locale, "Wallet connection is not configured")}</p>
         <p className="mt-1 text-xs leading-5 text-titanium">
-          {zh ? "請在 .env.local 加入 NEXT_PUBLIC_REOWN_PROJECT_ID，重新啟動網站後即可連接錢包。" : "Add NEXT_PUBLIC_REOWN_PROJECT_ID to .env.local, then restart the app."}
+          {tx(locale, "Add NEXT_PUBLIC_REOWN_PROJECT_ID to .env.local, then restart the app.")}
         </p>
       </div>
     );
@@ -153,7 +152,7 @@ function ConfiguredWalletConnect({ locale, onUseAddress }: { locale: Locale; onU
           onClick={() => setSelectionOpen(true)}
           type="button"
         >
-          <span>{zh ? "連接其他錢包或資產" : "Connect another wallet or asset"}</span>
+          <span>{tx(locale, "Connect another wallet or asset")}</span>
           <ChevronDown size={16} />
         </button>
       )}
@@ -166,7 +165,7 @@ function ConfiguredWalletConnect({ locale, onUseAddress }: { locale: Locale; onU
           type="button"
         >
           <Cpu size={17} />
-          {zh ? "冷錢包" : "Cold wallet"}
+          {tx(locale, "Cold wallet")}
         </button>
         <button
           className={clsx("focus-ring flex min-h-12 items-center justify-center gap-2 rounded-full text-sm font-medium", kind === "hot" ? "primary-button" : "text-titanium hover:text-ink")}
@@ -174,7 +173,7 @@ function ConfiguredWalletConnect({ locale, onUseAddress }: { locale: Locale; onU
           type="button"
         >
           <Smartphone size={17} />
-          {zh ? "熱錢包" : "Hot wallet"}
+          {tx(locale, "Hot wallet")}
         </button>
       </div>
 
@@ -197,7 +196,7 @@ function ConfiguredWalletConnect({ locale, onUseAddress }: { locale: Locale; onU
 
       <div className="field-surface apple-card-sm border border-line p-4">
         <p className="text-sm font-medium text-ink">
-          {zh ? "選擇要匯入的網路／資產" : "Choose a network or asset to import"}
+          {tx(locale, "Choose a network or asset to import")}
         </p>
         <p className="mt-1 text-xs leading-5 text-titanium">
           {zh ? `將透過 ${selectedWallet.name} 取得所選區塊鏈的公開地址。` : `The public address will be requested through ${selectedWallet.name}.`}
@@ -220,7 +219,7 @@ function ConfiguredWalletConnect({ locale, onUseAddress }: { locale: Locale; onU
 
       {connectedChains.length > 0 && (
         <div className="apple-card-sm border border-mint/25 bg-mint/5 p-4">
-          <p className="text-sm font-medium text-ink">{zh ? "已連接的公開地址" : "Connected public addresses"}</p>
+          <p className="text-sm font-medium text-ink">{tx(locale, "Connected public addresses")}</p>
           <div className="mt-3 space-y-2">
             {connectedChains.map((chain) => {
               const account = accountFor(chain);
@@ -236,7 +235,7 @@ function ConfiguredWalletConnect({ locale, onUseAddress }: { locale: Locale; onU
                     type="button"
                   >
                     <Plus size={14} />
-                    {zh ? "加入追蹤" : "Track"}
+                    {tx(locale, "Track")}
                   </button>
                 </div>
               );
@@ -247,8 +246,8 @@ function ConfiguredWalletConnect({ locale, onUseAddress }: { locale: Locale; onU
 
       <p className="text-xs leading-5 text-titanium">
         {kind === "hardware"
-          ? (zh ? "冷錢包通常會透過 Ledger Live、Trezor Suite、MetaMask 或 Phantom 提供公開地址；所有確認仍在你的裝置或錢包 App 中完成。" : "Cold wallets usually provide their public address through Ledger Live, Trezor Suite, MetaMask, or Phantom.")
-          : (zh ? "只會讀取錢包提供的公開地址，不會要求交易簽名、助記詞、private key 或 PIN。" : "Only public addresses are read. No signature, seed phrase, private key, or PIN is requested.")}
+          ? (tx(locale, "Cold wallets usually provide their public address through Ledger Live, Trezor Suite, MetaMask, or Phantom."))
+          : (tx(locale, "Only public addresses are read. No signature, seed phrase, private key, or PIN is requested."))}
       </p>
     </div>
   );

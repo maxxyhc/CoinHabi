@@ -6,6 +6,7 @@ import clsx from "clsx";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { WalletConnect } from "@/components/wallet-connect";
 import type { Holding, Locale, WalletAccount, WalletAddressKind, WalletChain, WalletScanResponse } from "@/lib/types";
+import { tx } from "@/lib/i18n";
 
 const chainLabels: Record<WalletChain, string> = {
   ethereum: "Ethereum / EVM",
@@ -115,7 +116,7 @@ export function WalletTracker({
         error: sessionError,
       } = await supabase.auth.getSession();
       if (sessionError || !session?.access_token) {
-        throw new Error(zh ? "登入狀態已失效，請重新登入。" : "Your session has expired. Please sign in again.");
+        throw new Error(tx(locale, "Your session has expired. Please sign in again."));
       }
 
       const response = await fetch("/api/wallet/scan", {
@@ -135,7 +136,7 @@ export function WalletTracker({
       if (!contentType.includes("application/json")) {
         throw new Error(
           response.status === 401
-            ? (zh ? "登入狀態已失效，請重新登入。" : "Your session has expired. Please sign in again.")
+            ? (tx(locale, "Your session has expired. Please sign in again."))
             : (zh ? `錢包同步服務回傳異常格式（HTTP ${response.status}）。` : `Wallet sync returned an invalid response (HTTP ${response.status}).`),
         );
       }
@@ -203,7 +204,7 @@ export function WalletTracker({
     } finally {
       syncingIds.current.delete(account.id);
     }
-  }, [loadAccounts, onHoldingsChanged, supabase, userId, zh]);
+  }, [loadAccounts, locale, onHoldingsChanged, supabase, userId, zh]);
 
   useEffect(() => {
     if (demo) return;
@@ -217,17 +218,17 @@ export function WalletTracker({
   async function addAccount(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (demo) {
-      setError(zh ? "Demo 使用獨立範例資料，不會連接或儲存真實錢包。" : "Demo mode uses isolated sample data and does not connect or save real wallets.");
+      setError(tx(locale, "Demo mode uses isolated sample data and does not connect or save real wallets."));
       return;
     }
     if (!supabase || saving) return;
     const normalizedAddress = address.trim();
     if (!normalizedAddress) {
-      setError(zh ? "請輸入 public address。" : "Enter a public address.");
+      setError(tx(locale, "Enter a public address."));
       return;
     }
     if (accounts.some((account) => account.chain === chain && account.address.toLowerCase() === normalizedAddress.toLowerCase())) {
-      setError(zh ? "這個地址已經加入追蹤。" : "This address is already being tracked.");
+      setError(tx(locale, "This address is already being tracked."));
       return;
     }
     setSaving(true);
@@ -273,14 +274,14 @@ export function WalletTracker({
       <section className="glass-panel apple-card p-5">
         <div className="mb-5 flex items-center gap-2">
           <Wallet size={20} style={{ color: "var(--accent)" }} />
-          <h3 className="text-xl font-semibold text-ink">{zh ? "新增地址追蹤" : "Add watch-only address"}</h3>
+          <h3 className="text-xl font-semibold text-ink">{tx(locale, "Add watch-only address")}</h3>
         </div>
         <div className="mb-5">
-          <p className="mb-1 text-sm font-medium text-ink">{zh ? "選擇錢包類型" : "Choose wallet type"}</p>
-          <p className="mb-3 text-xs leading-5 text-titanium">{zh ? "先選冷錢包或熱錢包，再選品牌與區塊鏈。" : "Choose cold or hot wallet, then select the wallet and blockchain."}</p>
+          <p className="mb-1 text-sm font-medium text-ink">{tx(locale, "Choose wallet type")}</p>
+          <p className="mb-3 text-xs leading-5 text-titanium">{tx(locale, "Choose cold or hot wallet, then select the wallet and blockchain.")}</p>
           {demo ? (
             <div className="apple-card-sm border border-mint/20 bg-mint/5 p-4 text-sm leading-6 text-titanium">
-              {zh ? "Demo 使用獨立範例錢包，不會讀取、連接或儲存任何真實錢包資料。" : "Demo mode uses isolated sample wallets and never reads, connects, or stores real wallet data."}
+              {tx(locale, "Demo mode uses isolated sample wallets and never reads, connects, or stores real wallet data.")}
             </div>
           ) : (
             <WalletConnect
@@ -297,12 +298,12 @@ export function WalletTracker({
         </div>
         <div className="mb-5 flex items-center gap-3 text-xs uppercase tracking-[0.16em] text-titanium">
           <span className="h-px flex-1 bg-line" />
-          <span>{zh ? "或手動輸入" : "Or enter manually"}</span>
+          <span>{tx(locale, "Or enter manually")}</span>
           <span className="h-px flex-1 bg-line" />
         </div>
         <form className={clsx("space-y-4", demo && "opacity-60")} onSubmit={addAccount}>
           <fieldset className="contents" disabled={demo}>
-          <Field label={zh ? "區塊鏈" : "Blockchain"}>
+          <Field label={tx(locale, "Blockchain")}>
             <select
               className="input-control focus-ring w-full px-3 text-ink"
               value={chain}
@@ -316,14 +317,14 @@ export function WalletTracker({
             </select>
           </Field>
           {chain === "bitcoin" && (
-            <Field label={zh ? "Bitcoin 追蹤方式" : "Bitcoin tracking mode"}>
+            <Field label={tx(locale, "Bitcoin tracking mode")}>
               <div className="pill-panel grid grid-cols-2 gap-2 p-1.5">
                 <button
                   className={clsx("focus-ring min-h-11 rounded-full text-sm font-medium", addressKind === "address" ? "primary-button" : "text-titanium hover:text-ink")}
                   onClick={() => setAddressKind("address")}
                   type="button"
                 >
-                  {zh ? "單一地址" : "Single address"}
+                  {tx(locale, "Single address")}
                 </button>
                 <button
                   className={clsx("focus-ring min-h-11 rounded-full text-sm font-medium", addressKind === "xpub" ? "primary-button" : "text-titanium hover:text-ink")}
@@ -335,8 +336,8 @@ export function WalletTracker({
               </div>
             </Field>
           )}
-          <Field label={zh ? "自訂名稱" : "Name"}>
-            <input className="input-control focus-ring w-full px-3 text-ink" placeholder={zh ? "例如：冷錢包" : "e.g. Cold wallet"} value={label} onChange={(event) => setLabel(event.target.value)} />
+          <Field label={tx(locale, "Name")}>
+            <input className="input-control focus-ring w-full px-3 text-ink" placeholder={tx(locale, "e.g. Cold wallet")} value={label} onChange={(event) => setLabel(event.target.value)} />
           </Field>
           <Field label={chain === "bitcoin" && addressKind === "xpub" ? "xpub / ypub / zpub" : "Public address"}>
             <textarea
@@ -348,14 +349,14 @@ export function WalletTracker({
             />
           </Field>
           <div className="apple-card-sm border border-mint/20 bg-mint/5 p-3 text-xs leading-5 text-titanium">
-            {zh ? "只需要公開資訊。請勿輸入助記詞、private key 或 PIN。" : "Public information only. Never enter a seed phrase, private key, or PIN."}
+            {tx(locale, "Public information only. Never enter a seed phrase, private key, or PIN.")}
           </div>
-          {chain === "bitcoin" && addressKind === "address" && <Notice>{zh ? "單一 Bitcoin 地址可能無法代表完整錢包。若要掃完整帳戶，建議改用 xpub/ypub/zpub。" : "One Bitcoin address may not represent the entire wallet. Use xpub/ypub/zpub for account-level tracking."}</Notice>}
-          {chain === "bitcoin" && addressKind === "xpub" && <Notice>{zh ? "xpub/ypub/zpub 只能讀取公開地址與餘額，不能轉走資產；但會暴露整個 BTC 帳戶的交易隱私。" : "xpub/ypub/zpub can only reveal public addresses and balances, not spend funds. It does expose account-level privacy."}</Notice>}
-          {chain === "cardano" && <Notice>{zh ? "Cardano 建議使用 stake1... 取得較完整的錢包視角；如果找不到 stake address，也可以使用 addr1...，但可能只代表單一地址。" : "For Cardano, stake1... is recommended for a more complete wallet view. If you cannot find a stake address, addr1... still works but may only represent one address."}</Notice>}
+          {chain === "bitcoin" && addressKind === "address" && <Notice>{tx(locale, "One Bitcoin address may not represent the entire wallet. Use xpub/ypub/zpub for account-level tracking.")}</Notice>}
+          {chain === "bitcoin" && addressKind === "xpub" && <Notice>{tx(locale, "xpub/ypub/zpub can only reveal public addresses and balances, not spend funds. It does expose account-level privacy.")}</Notice>}
+          {chain === "cardano" && <Notice>{tx(locale, "For Cardano, stake1... is recommended for a more complete wallet view. If you cannot find a stake address, addr1... still works but may only represent one address.")}</Notice>}
           <button className="primary-button focus-ring flex min-h-12 w-full items-center justify-center gap-2 rounded-full px-4 font-medium disabled:opacity-60" disabled={saving} type="submit">
             {saving ? <LoaderCircle className="animate-spin" size={17} /> : <Plus size={17} />}
-            {zh ? "新增並同步" : "Add and sync"}
+            {tx(locale, "Add and sync")}
           </button>
           </fieldset>
         </form>
@@ -363,16 +364,16 @@ export function WalletTracker({
 
       <section className="glass-panel apple-card p-5">
         <div className="mb-5">
-          <h3 className="text-xl font-semibold text-ink">{zh ? "追蹤中的地址" : "Tracked addresses"}</h3>
+          <h3 className="text-xl font-semibold text-ink">{tx(locale, "Tracked addresses")}</h3>
           <p className="mt-1 text-sm text-titanium">
             {demo
-              ? (zh ? "以下為獨立範例資料，不會存取你的錢包或資料庫。" : "These are isolated examples and do not access your wallet or database.")
-              : (zh ? "開啟頁面會自動同步，也可以個別更新。" : "Addresses sync on page load and can be refreshed individually.")}
+              ? (tx(locale, "These are isolated examples and do not access your wallet or database."))
+              : (tx(locale, "Addresses sync on page load and can be refreshed individually."))}
           </p>
         </div>
         {error && <div className="apple-card-sm mb-4 border border-rose/30 bg-rose/10 p-3 text-sm text-rose">{error}</div>}
         {!accounts.length ? (
-          <div className="subtle-panel apple-card-sm p-8 text-center text-titanium">{zh ? "尚未新增追蹤地址。" : "No tracked addresses yet."}</div>
+          <div className="subtle-panel apple-card-sm p-8 text-center text-titanium">{tx(locale, "No tracked addresses yet.")}</div>
         ) : (
           <div className="space-y-3">
             {accounts.map((account) => (
@@ -387,7 +388,7 @@ export function WalletTracker({
                     </div>
                     <p className="mt-2 truncate font-mono text-xs text-titanium">{account.address}</p>
                     <p className="mt-2 text-xs text-titanium">
-                      {account.sync_status === "syncing" ? (zh ? "同步中..." : "Syncing...") : account.last_synced_at ? `${zh ? "最後同步" : "Last sync"}: ${new Date(account.last_synced_at).toLocaleString()}` : (zh ? "尚未同步" : "Not synced yet")}
+                      {account.sync_status === "syncing" ? (tx(locale, "Syncing...")) : account.last_synced_at ? `${tx(locale, "Last sync")}: ${new Date(account.last_synced_at).toLocaleString()}` : (tx(locale, "Not synced yet"))}
                     </p>
                     {account.last_error && <p className={clsx("mt-2 text-xs", account.sync_status === "error" ? "text-rose" : "text-amber")}>{translateWalletWarning(account.last_error, locale)}</p>}
                   </div>

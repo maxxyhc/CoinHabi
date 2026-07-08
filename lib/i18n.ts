@@ -1,4 +1,44 @@
 import type { Locale } from "@/lib/types";
+import { phraseTranslations } from "@/lib/translations";
+import translationOverrides from "@/lib/translation-overrides.json";
+
+export const localeOrder: Locale[] = ["zh", "en", "es", "ja", "ko"];
+
+export const localeNames: Record<Locale, string> = {
+  en: "English",
+  zh: "中文",
+  ja: "日本語",
+  ko: "한국어",
+  es: "Español",
+};
+
+export const localeShortNames: Record<Locale, string> = {
+  en: "EN",
+  zh: "中",
+  ja: "日",
+  ko: "한",
+  es: "ES",
+};
+
+export const localeDateTag: Record<Locale, string> = {
+  en: "en-US",
+  zh: "zh-TW",
+  ja: "ja-JP",
+  ko: "ko-KR",
+  es: "es-ES",
+};
+
+export const tradingViewLocale: Record<Locale, "en" | "zh_TW" | "es" | "ja" | "ko"> = {
+  en: "en",
+  zh: "zh_TW",
+  es: "es",
+  ja: "ja",
+  ko: "ko",
+};
+
+export function isLocale(value: unknown): value is Locale {
+  return typeof value === "string" && (localeOrder as string[]).includes(value);
+}
 
 export const dictionary = {
   en: {
@@ -133,8 +173,235 @@ export const dictionary = {
     cash: "現金",
     baseCurrencyHelp: "投資組合總額統一換算成 USD。台股與 TWD 現金會使用最新匯率。",
   },
+  ja: {
+    appName: "資産トラッカー",
+    appSubtitle: "プライベートなポートフォリオ管理センター",
+    dashboard: "ダッシュボード",
+    holdings: "保有資産",
+    quantities: "保有数量",
+    cashflow: "家計簿",
+    financialHealth: "財務健全度",
+    charts: "チャート",
+    analysis: "分析",
+    settings: "設定",
+    totalValue: "総資産",
+    totalGain: "含み損益",
+    dayChange: "本日の変動",
+    returnRate: "リターン",
+    addHolding: "資産を追加",
+    editHolding: "資産を編集",
+    delete: "削除",
+    cancel: "キャンセル",
+    save: "保存",
+    refresh: "価格を更新",
+    signedIn: "ログイン中",
+    signOut: "ログアウト",
+    symbol: "銘柄コード",
+    name: "名称",
+    type: "種類",
+    quantity: "数量",
+    quantityLots: "単元（1単元 = 1,000株）",
+    averageCost: "平均取得単価",
+    currency: "通貨",
+    notes: "メモ",
+    value: "評価額",
+    gainLoss: "損益",
+    allocation: "配分",
+    source: "ソース",
+    manual: "手動",
+    costUnknown: "取得原価不明",
+    costKnown: "取得原価あり",
+    priceUnavailable: "価格未取得",
+    lastUpdated: "最終更新",
+    noHoldings: "最初の資産を追加すると、ポートフォリオの追跡を開始できます。",
+    language: "言語",
+    baseCurrency: "基準通貨",
+    security: "セキュリティ",
+    allowedUser: "設定されたメールアドレスのみこのアプリにアクセスできます。",
+    signInTitle: "ポートフォリオにログイン",
+    signInSubtitle: "環境設定で許可されたメールアドレスを使用してください。",
+    email: "メールアドレス",
+    password: "パスワード",
+    signIn: "ログイン",
+    createAccount: "アカウント作成",
+    loginError: "このメールアドレスはこのアプリの利用が許可されていません。",
+    assetMix: "資産構成",
+    currencyMix: "通貨構成",
+    topHoldings: "主要保有資産",
+    leaders: "上昇率トップ",
+    laggards: "下落率トップ",
+    concentration: "集中度",
+    concentrationOk: "ポートフォリオの30%を超える単一資産はありません。",
+    concentrationWarn: "単一資産がポートフォリオの30%を超えています。",
+    crypto: "暗号資産",
+    us_stock: "米国株",
+    tw_stock: "台湾株",
+    cash: "現金",
+    baseCurrencyHelp: "ポートフォリオ合計はUSDに換算されます。TWD資産は最新の為替レートを使用します。",
+  },
+  ko: {
+    appName: "자산 트래커",
+    appSubtitle: "개인 포트폴리오 관리 센터",
+    dashboard: "대시보드",
+    holdings: "보유 자산",
+    quantities: "보유 수량",
+    cashflow: "가계부",
+    financialHealth: "재무 건전성",
+    charts: "차트",
+    analysis: "분석",
+    settings: "설정",
+    totalValue: "총자산",
+    totalGain: "평가 손익",
+    dayChange: "당일 변동",
+    returnRate: "수익률",
+    addHolding: "자산 추가",
+    editHolding: "자산 편집",
+    delete: "삭제",
+    cancel: "취소",
+    save: "저장",
+    refresh: "가격 새로고침",
+    signedIn: "로그인됨",
+    signOut: "로그아웃",
+    symbol: "종목 코드",
+    name: "이름",
+    type: "유형",
+    quantity: "수량",
+    quantityLots: "단위 (1단위 = 1,000주)",
+    averageCost: "평균 매입가",
+    currency: "통화",
+    notes: "메모",
+    value: "평가액",
+    gainLoss: "손익",
+    allocation: "비중",
+    source: "출처",
+    manual: "수동",
+    costUnknown: "매입가 미상",
+    costKnown: "매입가 있음",
+    priceUnavailable: "가격 없음",
+    lastUpdated: "마지막 업데이트",
+    noHoldings: "첫 자산을 추가하면 포트폴리오 추적을 시작할 수 있습니다.",
+    language: "언어",
+    baseCurrency: "기준 통화",
+    security: "보안",
+    allowedUser: "설정된 이메일만 이 앱에 접근할 수 있습니다.",
+    signInTitle: "포트폴리오에 로그인",
+    signInSubtitle: "환경 설정에서 허용된 이메일을 사용하세요.",
+    email: "이메일",
+    password: "비밀번호",
+    signIn: "로그인",
+    createAccount: "계정 만들기",
+    loginError: "이 이메일은 이 앱을 사용할 수 없습니다.",
+    assetMix: "자산 구성",
+    currencyMix: "통화 구성",
+    topHoldings: "주요 보유 자산",
+    leaders: "상승률 상위",
+    laggards: "하락률 상위",
+    concentration: "집중도",
+    concentrationOk: "포트폴리오의 30%를 넘는 단일 자산이 없습니다.",
+    concentrationWarn: "단일 자산이 포트폴리오의 30%를 넘습니다.",
+    crypto: "암호화폐",
+    us_stock: "미국 주식",
+    tw_stock: "대만 주식",
+    cash: "현금",
+    baseCurrencyHelp: "포트폴리오 합계는 USD로 환산됩니다. TWD 자산은 최신 환율을 사용합니다.",
+  },
+  es: {
+    appName: "Rastreador financiero",
+    appSubtitle: "Centro de control de tu cartera privada",
+    dashboard: "Resumen",
+    holdings: "Posiciones",
+    quantities: "Cantidades",
+    cashflow: "Flujo de caja",
+    financialHealth: "Salud financiera",
+    charts: "Gráficos",
+    analysis: "Análisis",
+    settings: "Ajustes",
+    totalValue: "Valor total",
+    totalGain: "Ganancia no realizada",
+    dayChange: "Cambio del día",
+    returnRate: "Rentabilidad",
+    addHolding: "Añadir posición",
+    editHolding: "Editar posición",
+    delete: "Eliminar",
+    cancel: "Cancelar",
+    save: "Guardar",
+    refresh: "Actualizar precios",
+    signedIn: "Sesión iniciada",
+    signOut: "Cerrar sesión",
+    symbol: "Símbolo",
+    name: "Nombre",
+    type: "Tipo",
+    quantity: "Cantidad",
+    quantityLots: "Lotes (1 lote = 1000 acciones)",
+    averageCost: "Coste medio",
+    currency: "Moneda",
+    notes: "Notas",
+    value: "Valor",
+    gainLoss: "Ganancia/Pérdida",
+    allocation: "Distribución",
+    source: "Origen",
+    manual: "Manual",
+    costUnknown: "Coste desconocido",
+    costKnown: "Coste conocido",
+    priceUnavailable: "Precio no disponible",
+    lastUpdated: "Última actualización",
+    noHoldings: "Añade tu primera posición para empezar a seguir tu cartera.",
+    language: "Idioma",
+    baseCurrency: "Moneda base",
+    security: "Seguridad",
+    allowedUser: "Solo el correo configurado puede acceder a esta app.",
+    signInTitle: "Inicia sesión en tu cartera",
+    signInSubtitle: "Usa el correo permitido en tu configuración de entorno.",
+    email: "Correo electrónico",
+    password: "Contraseña",
+    signIn: "Iniciar sesión",
+    createAccount: "Crear cuenta",
+    loginError: "Este correo no está autorizado para esta app.",
+    assetMix: "Composición de activos",
+    currencyMix: "Composición de divisas",
+    topHoldings: "Mayores posiciones",
+    leaders: "Mejores",
+    laggards: "Peores",
+    concentration: "Concentración",
+    concentrationOk: "Ninguna posición supera el 30% de la cartera.",
+    concentrationWarn: "Una posición supera el 30% de la cartera.",
+    crypto: "Cripto",
+    us_stock: "Acción EE. UU.",
+    tw_stock: "Acción Taiwán",
+    cash: "Efectivo",
+    baseCurrencyHelp: "Los totales de la cartera se normalizan a USD. Las posiciones en TWD usan el tipo de cambio más reciente.",
+  },
 } as const;
 
 export function getDictionary(locale: Locale) {
   return dictionary[locale];
+}
+
+const fallbackText: Record<Exclude<Locale, "en">, string> = {
+  zh: "此處文字尚未翻譯",
+  es: "Texto pendiente de traducir",
+  ja: "未翻訳の表示文",
+  ko: "번역되지 않은 문구",
+};
+
+function isPlaceholderTranslation(value: string | undefined, key: string) {
+  return !value || value === key || /^(Sin traducir|未翻訳|번역 필요):/.test(value);
+}
+
+export function tx(locale: Locale, key: string, params: Record<string, string | number> = {}): string {
+  const overrides = translationOverrides as Record<Exclude<Locale, "en">, Record<string, string>>;
+  const template = locale === "en"
+    ? key
+    : overrides[locale]?.[key] ?? phraseTranslations[locale]?.[key];
+  if (locale !== "en" && isPlaceholderTranslation(template, key)) {
+    return fallbackText[locale];
+  }
+  if (!template) {
+    throw new Error(`Missing ${locale} translation for: ${key}`);
+  }
+
+  return Object.entries(params).reduce(
+    (text, [name, value]) => text.replaceAll(`{${name}}`, String(value)),
+    template,
+  );
 }

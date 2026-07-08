@@ -58,6 +58,7 @@ import clsx from "clsx";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { TradingViewWidget, toTradingViewSymbol } from "@/components/tradingview-widget";
 import { WalletTracker } from "@/components/wallet-tracker";
+import { HoldingsImport } from "@/components/holdings-import";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { MobilePortfolioApp } from "@/components/mobile-portfolio-app";
 import {
@@ -80,7 +81,7 @@ import {
   type CurrencyBuckets,
   type MonthlyCashflowOverview,
 } from "@/lib/calculations";
-import { getDictionary } from "@/lib/i18n";
+import { getDictionary, isLocale, localeNames, localeOrder, tx } from "@/lib/i18n";
 import type { AssetType, CashflowTransaction, CashflowTransactionInput, CashflowType, CryptoSearchResult, Currency, Debt, DebtInput, DebtType, EnrichedHolding, Holding, HoldingInput, Locale, MarketResponse, MonthlyBudget, MonthlyBudgetInput, RecurringExpense, RecurringExpenseInput, SymbolSearchResult } from "@/lib/types";
 
 type Tab = "dashboard" | "holdings" | "quantities" | "cashflow" | "financialHealth" | "charts" | "analysis" | "settings";
@@ -247,7 +248,7 @@ function normalizePaymentMethod(value: string | null | undefined) {
 function getPaymentMethodLabel(value: string | null | undefined, locale: Locale) {
   const normalized = normalizePaymentMethod(value);
   const method = paymentMethods.find((option) => option.value === normalized);
-  if (!method) return locale === "zh" ? "未設定" : "Not set";
+  if (!method) return tx(locale, "Not set");
   return locale === "zh" ? method.zh : method.en;
 }
 
@@ -361,8 +362,8 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
   }
 
   useEffect(() => {
-    const storedLocale = window.localStorage.getItem("locale") as Locale | null;
-    if (storedLocale === "en" || storedLocale === "zh") {
+    const storedLocale = window.localStorage.getItem("locale");
+    if (isLocale(storedLocale)) {
       setLocale(storedLocale);
     }
   }, []);
@@ -716,7 +717,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
   async function saveHolding(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (demo) {
-      setError(locale === "zh" ? "Demo 模式為唯讀，不會儲存變更。" : "Demo mode is read-only. Changes are not saved.");
+      setError(tx(locale, "Demo mode is read-only. Changes are not saved."));
       return;
     }
     if (!supabase || !userId) {
@@ -784,7 +785,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
   async function saveCashflowTransaction(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (demo) {
-      setError(locale === "zh" ? "Demo 模式為唯讀，不會儲存變更。" : "Demo mode is read-only. Changes are not saved.");
+      setError(tx(locale, "Demo mode is read-only. Changes are not saved."));
       return;
     }
     if (!supabase || !userId) {
@@ -794,7 +795,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
 
     const amount = Number(cashflowForm.amount || 0);
     if (!Number.isFinite(amount) || amount <= 0) {
-      setError(locale === "zh" ? "金額必須大於 0。" : "Amount must be greater than 0.");
+      setError(tx(locale, "Amount must be greater than 0."));
       return;
     }
 
@@ -827,7 +828,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
   async function saveRecurringExpense(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (demo) {
-      setError(locale === "zh" ? "Demo 模式為唯讀，不會儲存變更。" : "Demo mode is read-only. Changes are not saved.");
+      setError(tx(locale, "Demo mode is read-only. Changes are not saved."));
       return;
     }
     if (!supabase || !userId) {
@@ -838,11 +839,11 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
     const amount = Number(recurringForm.amount || 0);
     const reminderDays = Number(recurringForm.reminder_days || 0);
     if (!Number.isFinite(amount) || amount <= 0) {
-      setError(locale === "zh" ? "金額必須大於 0。" : "Amount must be greater than 0.");
+      setError(tx(locale, "Amount must be greater than 0."));
       return;
     }
     if (!Number.isInteger(reminderDays) || reminderDays < 0 || reminderDays > 60) {
-      setError(locale === "zh" ? "提醒天數必須是 0 到 60 之間的整數。" : "Reminder days must be an integer from 0 to 60.");
+      setError(tx(locale, "Reminder days must be an integer from 0 to 60."));
       return;
     }
 
@@ -863,7 +864,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
     };
 
     if (!payload.name) {
-      setError(locale === "zh" ? "請輸入固定支出名稱。" : "Please enter a recurring expense name.");
+      setError(tx(locale, "Please enter a recurring expense name."));
       return;
     }
 
@@ -886,7 +887,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
   async function saveDebt(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (demo) {
-      setError(locale === "zh" ? "Demo 模式為唯讀，不會儲存變更。" : "Demo mode is read-only. Changes are not saved.");
+      setError(tx(locale, "Demo mode is read-only. Changes are not saved."));
       return;
     }
     if (!supabase || !userId) {
@@ -900,11 +901,11 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
     const minimumPayment = Number(debtForm.minimum_payment || 0);
 
     if (!Number.isFinite(originalPrincipal) || !Number.isFinite(remainingPrincipal) || !Number.isFinite(interestRate) || !Number.isFinite(minimumPayment)) {
-      setError(locale === "zh" ? "請確認本金、利率與付款金額都是有效數字。" : "Principal, interest rate, and payment must be valid numbers.");
+      setError(tx(locale, "Principal, interest rate, and payment must be valid numbers."));
       return;
     }
     if (remainingPrincipal < 0 || originalPrincipal < 0 || interestRate < 0 || minimumPayment < 0) {
-      setError(locale === "zh" ? "債務金額、利率與付款金額不能小於 0。" : "Debt amounts, interest rate, and payment cannot be negative.");
+      setError(tx(locale, "Debt amounts, interest rate, and payment cannot be negative."));
       return;
     }
 
@@ -924,7 +925,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
     };
 
     if (!payload.name) {
-      setError(locale === "zh" ? "請輸入貸款或債務名稱。" : "Please enter a debt name.");
+      setError(tx(locale, "Please enter a debt name."));
       return;
     }
 
@@ -947,7 +948,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
   async function saveMonthlyBudget(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (demo) {
-      setError(locale === "zh" ? "Demo 模式為唯讀，不會儲存變更。" : "Demo mode is read-only. Changes are not saved.");
+      setError(tx(locale, "Demo mode is read-only. Changes are not saved."));
       return;
     }
     if (!supabase || !userId) {
@@ -957,7 +958,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
 
     const amount = Number(budgetForm.amount || 0);
     if (!Number.isFinite(amount) || amount <= 0) {
-      setError(locale === "zh" ? "預算金額必須大於 0。" : "Budget amount must be greater than 0.");
+      setError(tx(locale, "Budget amount must be greater than 0."));
       return;
     }
 
@@ -988,7 +989,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
 
   async function deleteHolding(id: string) {
     if (demo) {
-      setError(locale === "zh" ? "Demo 模式為唯讀，不會刪除資料。" : "Demo mode is read-only. Nothing was deleted.");
+      setError(tx(locale, "Demo mode is read-only. Nothing was deleted."));
       return;
     }
     if (!supabase) {
@@ -1004,7 +1005,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
 
   async function deleteCashflowTransaction(id: string) {
     if (demo) {
-      setError(locale === "zh" ? "Demo 模式為唯讀，不會刪除資料。" : "Demo mode is read-only. Nothing was deleted.");
+      setError(tx(locale, "Demo mode is read-only. Nothing was deleted."));
       return;
     }
     if (!supabase) {
@@ -1021,7 +1022,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
 
   async function deleteRecurringExpense(id: string) {
     if (demo) {
-      setError(locale === "zh" ? "Demo 模式為唯讀，不會刪除資料。" : "Demo mode is read-only. Nothing was deleted.");
+      setError(tx(locale, "Demo mode is read-only. Nothing was deleted."));
       return;
     }
     if (!supabase) {
@@ -1038,7 +1039,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
 
   async function deleteDebt(id: string) {
     if (demo) {
-      setError(locale === "zh" ? "Demo 模式為唯讀，不會刪除資料。" : "Demo mode is read-only. Nothing was deleted.");
+      setError(tx(locale, "Demo mode is read-only. Nothing was deleted."));
       return;
     }
     if (!supabase) {
@@ -1055,7 +1056,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
 
   async function deleteMonthlyBudget(id: string) {
     if (demo) {
-      setError(locale === "zh" ? "Demo 模式為唯讀，不會刪除資料。" : "Demo mode is read-only. Nothing was deleted.");
+      setError(tx(locale, "Demo mode is read-only. Nothing was deleted."));
       return;
     }
     if (!supabase) {
@@ -1158,18 +1159,18 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
             </div>
 
             <nav className="app-sidebar-nav min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-              <NavSection label={locale === "zh" ? "投資" : "Investing"}>
+              <NavSection label={tx(locale, "Investing")}>
                 <NavButton active={activeTab === "dashboard"} icon={<LayoutDashboard size={18} />} label={t.dashboard} onClick={() => setActiveTab("dashboard")} />
                 <NavButton active={activeTab === "holdings"} icon={<WalletCards size={18} />} label={t.holdings} onClick={() => setActiveTab("holdings")} />
                 <NavButton active={activeTab === "quantities"} icon={<ListChecks size={18} />} label={t.quantities} onClick={() => setActiveTab("quantities")} />
                 <NavButton active={activeTab === "analysis"} icon={<BarChart3 size={18} />} label={t.analysis} onClick={() => setActiveTab("analysis")} />
               </NavSection>
-              <NavSection label={locale === "zh" ? "記帳" : "Cashflow"}>
+              <NavSection label={tx(locale, "Cashflow")}>
                 <NavButton active={activeTab === "cashflow"} icon={<ReceiptText size={18} />} label={t.cashflow} onClick={() => setActiveTab("cashflow")} />
                 <NavButton active={activeTab === "financialHealth"} icon={<Activity size={18} />} label={t.financialHealth} onClick={() => setActiveTab("financialHealth")} />
                 <NavButton active={activeTab === "charts"} icon={<LineChartIcon size={18} />} label={t.charts} onClick={() => setActiveTab("charts")} />
               </NavSection>
-              <NavSection label={locale === "zh" ? "系統" : "System"}>
+              <NavSection label={tx(locale, "System")}>
                 <NavButton active={activeTab === "settings"} icon={<Settings size={18} />} label={t.settings} onClick={() => setActiveTab("settings")} />
               </NavSection>
             </nav>
@@ -1177,7 +1178,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
             <div className="mt-5 shrink-0 space-y-2.5 lg:mt-3 lg:border-t lg:border-line lg:px-0.5 lg:pb-1 lg:pt-3">
               <div className="subtle-panel apple-card-sm p-3.5">
                 <p className="text-xs uppercase text-titanium">{demo ? "Demo mode" : t.signedIn}</p>
-                <p className="mt-1 truncate text-sm text-ink">{demo ? (locale === "zh" ? "範例資料，唯讀展示" : "Sample data, read-only") : userEmail}</p>
+                <p className="mt-1 truncate text-sm text-ink">{demo ? (tx(locale, "Sample data, read-only")) : userEmail}</p>
               </div>
               {!demo && (
                 <button
@@ -1346,23 +1347,20 @@ function Header({
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-1.5 sm:flex-wrap sm:gap-3">
-        <ThemeToggle compact />
-        <div className="pill-panel hidden p-1 min-[390px]:flex">
-          <button
-            className={clsx("focus-ring rounded-full px-2.5 py-2 text-xs sm:px-3 sm:text-sm", locale === "zh" ? "primary-button" : "text-titanium")}
-            onClick={() => onLocaleChange("zh")}
-            type="button"
+        <ThemeToggle compact locale={locale} />
+        <label className="pill-panel focus-within:ring-2 focus-within:ring-[var(--accent)]/35 relative hidden h-11 min-w-[118px] cursor-pointer items-center justify-center gap-2 rounded-full px-4 min-[390px]:flex">
+          <Languages aria-hidden="true" className="shrink-0 text-[var(--accent)]" size={18} />
+          <span className="text-sm font-semibold text-ink">{localeNames[locale]}</span>
+          <select
+            aria-label={t.language}
+            title={localeNames[locale]}
+            className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
+            value={locale}
+            onChange={(event) => onLocaleChange(event.target.value as Locale)}
           >
-            中文
-          </button>
-          <button
-            className={clsx("focus-ring rounded-full px-2.5 py-2 text-xs sm:px-3 sm:text-sm", locale === "en" ? "primary-button" : "text-titanium")}
-            onClick={() => onLocaleChange("en")}
-            type="button"
-          >
-            EN
-          </button>
-        </div>
+            {localeOrder.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}
+          </select>
+        </label>
         <button
           aria-label={t.refresh}
           className="primary-button focus-ring flex h-11 min-w-11 items-center justify-center gap-2 rounded-full px-3 text-sm font-medium transition sm:px-4"
@@ -1432,9 +1430,6 @@ function DashboardView({
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-xl font-semibold text-ink">TradingView</h3>
-            <p className="mt-1 text-sm text-titanium">
-              {locale === "zh" ? "免費嵌入圖表，只作視覺參考，不參與市值或損益計算。" : "Free embedded chart for visual reference only; portfolio pricing still uses Yahoo/CoinGecko."}
-            </p>
           </div>
           <select
             className="input-control focus-ring min-w-[180px] px-3 text-sm"
@@ -1470,13 +1465,17 @@ function DashboardView({
           />
         </section>
 
-        <section className="glass-panel apple-card p-5 sm:p-6">
-          <div className="mb-5 flex items-center gap-2">
-            <PieIcon size={20} style={{ color: "var(--accent)" }} />
-            <h3 className="text-xl font-semibold text-ink">{t.assetMix}</h3>
-          </div>
-          <ChartPanel data={assetMix.map((item) => ({ ...item, name: t[item.name as AssetType] }))} />
-        </section>
+        <div className="space-y-5">
+          <section className="glass-panel apple-card p-5 sm:p-6">
+            <div className="mb-5 flex items-center gap-2">
+              <PieIcon size={20} style={{ color: "var(--accent)" }} />
+              <h3 className="text-xl font-semibold text-ink">{t.assetMix}</h3>
+            </div>
+            <ChartPanel data={assetMix.map((item) => ({ ...item, name: t[item.name as AssetType] }))} />
+          </section>
+
+          <DayMoversPanel holdings={overviewHoldings} locale={locale} totals={totals} />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
@@ -1484,6 +1483,75 @@ function DashboardView({
         <RankPanel title={t.laggards} holdings={laggards} t={t} />
       </div>
     </div>
+  );
+}
+
+function DayMoversPanel({
+  holdings,
+  locale,
+  totals,
+}: {
+  holdings: EnrichedHolding[];
+  locale: Locale;
+  totals: ReturnType<typeof getPortfolioTotals>;
+}) {
+  const movers = [...holdings]
+    .filter((holding) => holding.asset_type !== "cash" && holding.quote && Math.abs(holding.dayChangeUsd) > 0.005)
+    .sort((a, b) => b.dayChangeUsd - a.dayChangeUsd)
+    .slice(0, 8);
+  const maxAbs = Math.max(...movers.map((holding) => Math.abs(holding.dayChangeUsd)), 1);
+  const totalPositive = totals.dayChange >= 0;
+
+  return (
+    <section className="glass-panel apple-card p-5 sm:p-6">
+      <div className="mb-1 flex items-center gap-2">
+        <Activity size={20} style={{ color: "var(--accent)" }} />
+        <h3 className="text-xl font-semibold text-ink">{tx(locale, "Today's movers")}</h3>
+      </div>
+      <p className="mb-5 text-sm text-titanium">
+        {tx(locale, "What moved your portfolio today (USD)")}
+      </p>
+      {movers.length ? (
+        <>
+          <div className="space-y-2.5">
+            {movers.map((holding) => {
+              const positive = holding.dayChangeUsd >= 0;
+              const width = Math.max((Math.abs(holding.dayChangeUsd) / maxAbs) * 50, 1.5);
+              return (
+                <div className="grid grid-cols-[76px_minmax(0,1fr)_92px] items-center gap-3 text-sm" key={holding.id}>
+                  <span className="truncate font-medium text-ink" title={holding.name}>{holding.symbol}</span>
+                  <div className="relative h-3.5">
+                    <span className="absolute bottom-[-3px] left-1/2 top-[-3px] w-px bg-line" />
+                    <span
+                      className={clsx(
+                        "absolute inset-y-0",
+                        positive ? "left-1/2 rounded-r bg-mint" : "right-1/2 rounded-l bg-rose",
+                      )}
+                      style={{ width: `${width}%` }}
+                    />
+                  </div>
+                  <span className={clsx("text-right tabular-nums", positive ? "text-mint" : "text-rose")}>
+                    {positive ? "+" : ""}
+                    {formatCurrency(holding.dayChangeUsd)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-5 flex items-baseline justify-between gap-3 border-t border-line pt-3">
+            <span className="text-sm text-titanium">{tx(locale, "Total today")}</span>
+            <span className={clsx("font-semibold tabular-nums", totalPositive ? "text-mint" : "text-rose")}>
+              {totalPositive ? "+" : ""}
+              {formatCurrency(totals.dayChange)} · {formatPercent(totals.dayChangePercent)}
+            </span>
+          </div>
+        </>
+      ) : (
+        <p className="subtle-panel apple-card-sm p-4 text-sm text-titanium">
+          {tx(locale, "No intraday change data to show yet.")}
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -1529,8 +1597,8 @@ function ChartsView({
       <section className="glass-panel apple-card p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-medium text-titanium">{zh ? "把記帳、固定支出、負債與投資整理成視覺圖表" : "Visual overview of cashflow, recurring costs, debt, and portfolio data"}</p>
-            <h3 className="mt-2 text-3xl font-semibold tracking-[-0.045em] text-ink">{zh ? "圖表" : "Charts"}</h3>
+            <p className="text-sm font-medium text-titanium">{tx(locale, "Visual overview of cashflow, recurring costs, debt, and portfolio data")}</p>
+            <h3 className="mt-2 text-3xl font-semibold tracking-[-0.045em] text-ink">{tx(locale, "Charts")}</h3>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-titanium">
               {zh
                 ? "圖表使用目前已輸入的資料與現有匯率換算成 USD。淨資產趨勢是依記帳現金流回推的估算，不是完整歷史價格快照。"
@@ -1544,20 +1612,20 @@ function ChartsView({
       </section>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-        <ChartCard title={zh ? "每月收入 vs 支出" : "Monthly income vs expense"} subtitle={zh ? "依交易日期彙整最近 6 個月份。" : "Grouped by transaction date for the last 6 months."} isEmpty={!monthlyCashflow.some((item) => item.income || item.expense)}>
+        <ChartCard title={tx(locale, "Monthly income vs expense")} subtitle={tx(locale, "Grouped by transaction date for the last 6 months.")} isEmpty={!monthlyCashflow.some((item) => item.income || item.expense)}>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={monthlyCashflow}>
               <CartesianGrid stroke="rgba(148, 163, 184, 0.22)" vertical={false} />
               <XAxis dataKey="label" tickLine={false} axisLine={false} />
               <YAxis tickFormatter={(value) => compactUsd(Number(value))} tickLine={false} axisLine={false} width={54} />
               <Tooltip content={<MoneyTooltip />} />
-              <Bar dataKey="income" name={zh ? "收入" : "Income"} fill="rgb(var(--mint))" radius={[8, 8, 0, 0]} />
-              <Bar dataKey="expense" name={zh ? "支出" : "Expense"} fill="rgb(var(--rose))" radius={[8, 8, 0, 0]} />
+              <Bar dataKey="income" name={tx(locale, "Income")} fill="rgb(var(--mint))" radius={[8, 8, 0, 0]} />
+              <Bar dataKey="expense" name={tx(locale, "Expense")} fill="rgb(var(--rose))" radius={[8, 8, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title={zh ? "支出分類圓餅圖" : "Expense category pie"} subtitle={zh ? "顯示本月支出分類占比。" : "Shows this month's expense mix by category."} isEmpty={!expenseCategoryData.length}>
+        <ChartCard title={tx(locale, "Expense category pie")} subtitle={tx(locale, "Shows this month's expense mix by category.")} isEmpty={!expenseCategoryData.length}>
           <ResponsiveContainer width="100%" height={280}>
             <PieChart>
               <Pie data={expenseCategoryData} dataKey="value" innerRadius={62} outerRadius={106} paddingAngle={4}>
@@ -1571,50 +1639,50 @@ function ChartsView({
           <ChartLegend data={expenseCategoryData} />
         </ChartCard>
 
-        <ChartCard title={zh ? "固定支出趨勢" : "Fixed expense trend"} subtitle={zh ? "依目前啟用的固定支出估算未來 6 個月。" : "Estimated for the next 6 months from active recurring expenses."} isEmpty={!fixedExpenseTrend.some((item) => item.value)}>
+        <ChartCard title={tx(locale, "Fixed expense trend")} subtitle={tx(locale, "Estimated for the next 6 months from active recurring expenses.")} isEmpty={!fixedExpenseTrend.some((item) => item.value)}>
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={fixedExpenseTrend}>
               <CartesianGrid stroke="rgba(148, 163, 184, 0.22)" vertical={false} />
               <XAxis dataKey="label" tickLine={false} axisLine={false} />
               <YAxis tickFormatter={(value) => compactUsd(Number(value))} tickLine={false} axisLine={false} width={54} />
               <Tooltip content={<MoneyTooltip />} />
-              <Line type="monotone" dataKey="value" name={zh ? "固定支出" : "Fixed expenses"} stroke="var(--accent)" strokeWidth={3} dot={{ r: 4 }} />
+              <Line type="monotone" dataKey="value" name={tx(locale, "Fixed expenses")} stroke="var(--accent)" strokeWidth={3} dot={{ r: 4 }} />
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title={zh ? "訂閱年化成本" : "Subscription annualized cost"} subtitle={zh ? "把月繳與年繳訂閱都換成年成本。" : "Monthly and yearly subscriptions converted to annual cost."} isEmpty={!subscriptionAnnualized.length}>
+        <ChartCard title={tx(locale, "Subscription annualized cost")} subtitle={tx(locale, "Monthly and yearly subscriptions converted to annual cost.")} isEmpty={!subscriptionAnnualized.length}>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={subscriptionAnnualized} layout="vertical" margin={{ left: 16, right: 16 }}>
               <CartesianGrid stroke="rgba(148, 163, 184, 0.22)" horizontal={false} />
               <XAxis type="number" tickFormatter={(value) => compactUsd(Number(value))} tickLine={false} axisLine={false} />
               <YAxis dataKey="name" type="category" tickLine={false} axisLine={false} width={110} />
               <Tooltip content={<MoneyTooltip />} />
-              <Bar dataKey="value" name={zh ? "年化成本" : "Annualized cost"} fill="var(--accent)" radius={[0, 8, 8, 0]} />
+              <Bar dataKey="value" name={tx(locale, "Annualized cost")} fill="var(--accent)" radius={[0, 8, 8, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title={zh ? "負債下降曲線" : "Debt decline curve"} subtitle={zh ? "依目前剩餘本金與最低付款粗估 12 個月，不含利息變動。" : "12-month estimate from current principal and minimum payments, excluding interest changes."} isEmpty={!debtDecline.some((item) => item.value)}>
+        <ChartCard title={tx(locale, "Debt decline curve")} subtitle={tx(locale, "12-month estimate from current principal and minimum payments, excluding interest changes.")} isEmpty={!debtDecline.some((item) => item.value)}>
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={debtDecline}>
               <CartesianGrid stroke="rgba(148, 163, 184, 0.22)" vertical={false} />
               <XAxis dataKey="label" tickLine={false} axisLine={false} />
               <YAxis tickFormatter={(value) => compactUsd(Number(value))} tickLine={false} axisLine={false} width={54} />
               <Tooltip content={<MoneyTooltip />} />
-              <Line type="monotone" dataKey="value" name={zh ? "剩餘負債" : "Remaining debt"} stroke="rgb(var(--rose))" strokeWidth={3} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="value" name={tx(locale, "Remaining debt")} stroke="rgb(var(--rose))" strokeWidth={3} dot={{ r: 3 }} />
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title={zh ? "淨資產趨勢" : "Net worth trend"} subtitle={zh ? "用目前淨資產與最近 6 個月記帳現金流回推估算。" : "Estimated from current net worth and the last 6 months of recorded cashflow."} isEmpty={!netWorthTrend.some((item) => item.value)}>
+        <ChartCard title={tx(locale, "Net worth trend")} subtitle={tx(locale, "Estimated from current net worth and the last 6 months of recorded cashflow.")} isEmpty={!netWorthTrend.some((item) => item.value)}>
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={netWorthTrend}>
               <CartesianGrid stroke="rgba(148, 163, 184, 0.22)" vertical={false} />
               <XAxis dataKey="label" tickLine={false} axisLine={false} />
               <YAxis tickFormatter={(value) => compactUsd(Number(value))} tickLine={false} axisLine={false} width={54} />
               <Tooltip content={<MoneyTooltip />} />
-              <Line type="monotone" dataKey="value" name={zh ? "估算淨資產" : "Estimated net worth"} stroke="rgb(var(--mint))" strokeWidth={3} dot={{ r: 4 }} />
+              <Line type="monotone" dataKey="value" name={tx(locale, "Estimated net worth")} stroke="rgb(var(--mint))" strokeWidth={3} dot={{ r: 4 }} />
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -1701,10 +1769,10 @@ function FinancialHealthView({
   });
   const healthTone = healthScore >= 80 ? "text-mint" : healthScore >= 60 ? "text-amber" : "text-rose";
   const healthLabel = healthScore >= 80
-    ? (zh ? "穩健" : "Strong")
+    ? (tx(locale, "Strong"))
     : healthScore >= 60
-      ? (zh ? "可改善" : "Needs attention")
-      : (zh ? "需優先整理" : "Needs work");
+      ? (tx(locale, "Needs attention"))
+      : (tx(locale, "Needs work"));
   const notes = buildFinancialHealthNotes({
     dataIssues,
     debtIncomeRatio,
@@ -1732,10 +1800,10 @@ function FinancialHealthView({
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full border border-line bg-white/10 px-3 py-1.5 text-xs font-semibold text-titanium">
               <Activity aria-hidden="true" className="text-[var(--accent)]" size={14} />
-              {zh ? "投資與現金流整合視圖" : "Portfolio and cashflow overview"}
+              {tx(locale, "Portfolio and cashflow overview")}
             </div>
             <h3 className="mt-4 text-3xl font-semibold tracking-[-0.05em] text-ink sm:text-4xl">
-              {zh ? "財務健康" : "Financial health"}
+              {tx(locale, "Financial health")}
             </h3>
             <p className="mt-3 max-w-2xl text-sm leading-7 text-titanium">
               {zh
@@ -1744,9 +1812,9 @@ function FinancialHealthView({
             </p>
             <div className="mt-6 flex flex-wrap gap-2">
               {[
-                { icon: <CircleDollarSign aria-hidden="true" size={14} />, label: zh ? "資產" : "Assets" },
-                { icon: <BarChart3 aria-hidden="true" size={14} />, label: zh ? "收支" : "Cashflow" },
-                { icon: <ReceiptText aria-hidden="true" size={14} />, label: zh ? "負債" : "Debt" },
+                { icon: <CircleDollarSign aria-hidden="true" size={14} />, label: tx(locale, "Assets") },
+                { icon: <BarChart3 aria-hidden="true" size={14} />, label: tx(locale, "Cashflow") },
+                { icon: <ReceiptText aria-hidden="true" size={14} />, label: tx(locale, "Debt") },
               ].map((item) => (
                 <span
                   key={item.label}
@@ -1768,17 +1836,17 @@ function FinancialHealthView({
       </section>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
-        <MetricCard label={zh ? "淨資產" : "Net worth"} value={formatCurrency(netWorthUsd)} trend={netWorthUsd} detail={zh ? "投資市值 - 未償負債" : "Portfolio value minus debt"} icon={<CircleDollarSign size={20} />} />
-        <MetricCard label={zh ? "本月儲蓄率" : "Savings rate"} value={formatHealthRatio(savingsRate)} trend={savingsRate ?? undefined} detail={zh ? "預估結餘 / 本月收入" : "Leftover divided by income"} icon={<BarChart3 size={20} />} />
-        <MetricCard label={zh ? "固定支出壓力" : "Fixed pressure"} value={formatHealthRatio(fixedPressure)} trend={fixedPressure === null ? undefined : -fixedPressure} detail={zh ? "固定支出 + 債務最低付款" : "Recurring plus debt minimums"} icon={<RefreshCw size={20} />} />
-        <MetricCard label={zh ? "負債收入比" : "Debt-to-income"} value={formatHealthRatio(debtIncomeRatio)} trend={debtIncomeRatio === null ? undefined : -debtIncomeRatio} detail={zh ? "債務最低付款 / 本月收入" : "Debt minimums divided by income"} icon={<Activity size={20} />} />
-        <MetricCard label={zh ? "總負債" : "Total debt"} value={formatCurrency(debtPrincipalUsd)} trend={debtPrincipalUsd ? -debtPrincipalUsd : undefined} detail={activeDebts.length ? (zh ? `${activeDebts.length} 筆啟用債務` : `${activeDebts.length} active debts`) : (zh ? "尚未記錄債務" : "No active debts")} icon={<ReceiptText size={20} />} />
-        <MetricCard label={zh ? "資料完整度" : "Data quality"} value={dataIssues ? `${dataIssues}` : (zh ? "良好" : "Good")} trend={dataIssues ? -dataIssues : 1} detail={zh ? "未知成本或缺價格筆數" : "Unknown cost or missing price count"} icon={<ShieldCheck size={20} />} />
+        <MetricCard label={tx(locale, "Net worth")} value={formatCurrency(netWorthUsd)} trend={netWorthUsd} detail={tx(locale, "Portfolio value minus debt")} icon={<CircleDollarSign size={20} />} />
+        <MetricCard label={tx(locale, "Savings rate")} value={formatHealthRatio(savingsRate)} trend={savingsRate ?? undefined} detail={tx(locale, "Leftover divided by income")} icon={<BarChart3 size={20} />} />
+        <MetricCard label={tx(locale, "Fixed pressure")} value={formatHealthRatio(fixedPressure)} trend={fixedPressure === null ? undefined : -fixedPressure} detail={tx(locale, "Recurring plus debt minimums")} icon={<RefreshCw size={20} />} />
+        <MetricCard label={tx(locale, "Debt-to-income")} value={formatHealthRatio(debtIncomeRatio)} trend={debtIncomeRatio === null ? undefined : -debtIncomeRatio} detail={tx(locale, "Debt minimums divided by income")} icon={<Activity size={20} />} />
+        <MetricCard label={tx(locale, "Total debt")} value={formatCurrency(debtPrincipalUsd)} trend={debtPrincipalUsd ? -debtPrincipalUsd : undefined} detail={activeDebts.length ? (zh ? `${activeDebts.length} 筆啟用債務` : `${activeDebts.length} active debts`) : (tx(locale, "No active debts"))} icon={<ReceiptText size={20} />} />
+        <MetricCard label={tx(locale, "Data quality")} value={dataIssues ? `${dataIssues}` : (tx(locale, "Good"))} trend={dataIssues ? -dataIssues : 1} detail={tx(locale, "Unknown cost or missing price count")} icon={<ShieldCheck size={20} />} />
       </div>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.1fr_0.9fr]">
         <section className="glass-panel apple-card p-5 sm:p-6">
-          <h3 className="text-xl font-semibold text-ink">{zh ? "健康提示" : "Health notes"}</h3>
+          <h3 className="text-xl font-semibold text-ink">{tx(locale, "Health notes")}</h3>
           <div className="mt-4 space-y-3">
             {notes.map((note) => (
               <div key={note} className="subtle-panel apple-card-sm flex gap-3 p-4">
@@ -1790,14 +1858,14 @@ function FinancialHealthView({
         </section>
 
         <section className="glass-panel apple-card p-5 sm:p-6">
-          <h3 className="text-xl font-semibold text-ink">{zh ? "目前組成" : "Current inputs"}</h3>
+          <h3 className="text-xl font-semibold text-ink">{tx(locale, "Current inputs")}</h3>
           <div className="mt-4 divide-y divide-line overflow-hidden rounded-3xl border border-line bg-panel/70">
-            <HealthRow label={zh ? "投資市值" : "Portfolio value"} value={formatCurrency(totals.totalValue)} />
-            <HealthRow label={zh ? "未償負債" : "Outstanding debt"} value={formatCurrency(debtPrincipalUsd)} />
-            <HealthRow label={zh ? "本月收入" : "Monthly income"} value={formatCurrency(incomeUsd)} />
-            <HealthRow label={zh ? "本月預估結餘" : "Estimated leftover"} value={formatCurrency(leftoverUsd)} />
-            <HealthRow label={zh ? "預算超支分類" : "Over-budget categories"} value={`${overBudgetRows.length}`} />
-            <HealthRow label={zh ? "可檢查訂閱" : "Subscriptions to review"} value={`${subscriptionsToReview.length}`} />
+            <HealthRow label={tx(locale, "Portfolio value")} value={formatCurrency(totals.totalValue)} />
+            <HealthRow label={tx(locale, "Outstanding debt")} value={formatCurrency(debtPrincipalUsd)} />
+            <HealthRow label={tx(locale, "Monthly income")} value={formatCurrency(incomeUsd)} />
+            <HealthRow label={tx(locale, "Estimated leftover")} value={formatCurrency(leftoverUsd)} />
+            <HealthRow label={tx(locale, "Over-budget categories")} value={`${overBudgetRows.length}`} />
+            <HealthRow label={tx(locale, "Subscriptions to review")} value={`${subscriptionsToReview.length}`} />
           </div>
         </section>
       </div>
@@ -1826,10 +1894,10 @@ function FinancialHealthGauge({
   const nextTarget = clampedScore >= 80 ? 100 : clampedScore >= 60 ? 80 : 60;
   const pointsToTarget = nextTarget - clampedScore;
   const targetLabel = clampedScore >= 80
-    ? (zh ? "滿分" : "perfect")
+    ? (tx(locale, "perfect"))
     : clampedScore >= 60
-      ? (zh ? "穩健" : "strong")
-      : (zh ? "留意區" : "attention");
+      ? (tx(locale, "strong"))
+      : (tx(locale, "attention"));
   const segments = [
     { from: 0, to: 58, color: "rgb(var(--rose))" },
     { from: 60, to: 78, color: "rgb(var(--amber))" },
@@ -1852,7 +1920,7 @@ function FinancialHealthGauge({
 
   return (
     <div
-      aria-label={`${zh ? "健康分數" : "Health score"} ${clampedScore} / 100, ${label}`}
+      aria-label={`${tx(locale, "Health score")} ${clampedScore} / 100, ${label}`}
       className="subtle-panel apple-card-sm relative w-full max-w-[470px] overflow-hidden p-5 sm:p-6"
       role="img"
     >
@@ -1948,7 +2016,7 @@ function FinancialHealthGauge({
             x={centerX}
             y="174"
           >
-            {zh ? "健康分數" : "HEALTH SCORE"}
+            {tx(locale, "HEALTH SCORE")}
           </text>
         </svg>
 
@@ -1957,13 +2025,13 @@ function FinancialHealthGauge({
             <span className={clsx("flex h-8 w-8 items-center justify-center rounded-full bg-white/10", tone)}>
               <ShieldCheck aria-hidden="true" size={17} />
             </span>
-            <p className="text-sm font-medium text-titanium">{zh ? "財務狀態" : "Financial status"}</p>
+            <p className="text-sm font-medium text-titanium">{tx(locale, "Financial status")}</p>
           </div>
           <p className="mt-4 whitespace-nowrap text-2xl font-semibold leading-tight tracking-[-0.04em] text-ink">{label}</p>
           <p className="mt-2 text-sm leading-5 text-titanium">
             {pointsToTarget > 0
               ? (zh ? `再 ${pointsToTarget} 分即可達${targetLabel}` : `${pointsToTarget} points to ${targetLabel}`)
-              : (zh ? "目前已達最高評級" : "You are in the top range")}
+              : (tx(locale, "You are in the top range"))}
           </p>
           <div className="mt-5 grid grid-cols-3 gap-2" aria-hidden="true">
             <span className="h-1.5 rounded-full bg-rose opacity-75" />
@@ -1971,9 +2039,9 @@ function FinancialHealthGauge({
             <span className="h-1.5 rounded-full bg-mint opacity-80" />
           </div>
           <div className="mt-2 grid grid-cols-3 text-[10px] font-medium text-titanium">
-            <span>{zh ? "改善" : "Build"}</span>
-            <span className="text-center">{zh ? "留意" : "Attention"}</span>
-            <span className="text-right">{zh ? "穩健" : "Strong"}</span>
+            <span>{tx(locale, "Build")}</span>
+            <span className="text-center">{tx(locale, "Attention")}</span>
+            <span className="text-right">{tx(locale, "Strong")}</span>
           </div>
         </div>
       </div>
@@ -2041,13 +2109,13 @@ function CashflowCalendar({
         <div className="flex items-center gap-2">
           <CalendarDays size={20} style={{ color: "var(--accent)" }} />
           <div>
-            <h3 className="text-xl font-semibold text-ink">{zh ? "月曆" : "Calendar"}</h3>
-            <p className="mt-1 text-sm text-titanium">{zh ? "查看收入、支出、固定扣款與債務付款日期。" : "Income, expenses, recurring charges, and debt payments."}</p>
+            <h3 className="text-xl font-semibold text-ink">{tx(locale, "Calendar")}</h3>
+            <p className="mt-1 text-sm text-titanium">{tx(locale, "Income, expenses, recurring charges, and debt payments.")}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <button className="focus-ring rounded-full border border-line px-3 py-2 text-sm text-titanium hover:text-ink" onClick={() => changeMonth(-1)} type="button">
-            {zh ? "上月" : "Prev"}
+            {tx(locale, "Prev")}
           </button>
           <div className="relative">
             <button
@@ -2060,7 +2128,7 @@ function CashflowCalendar({
             {monthPickerOpen && (
               <div className="glass-panel apple-card-sm absolute right-0 z-20 mt-2 w-64 p-3">
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label={zh ? "年份" : "Year"}>
+                  <Field label={tx(locale, "Year")}>
                     <select
                       className="input-control focus-ring w-full px-3 text-ink"
                       value={selected.getFullYear()}
@@ -2071,7 +2139,7 @@ function CashflowCalendar({
                       ))}
                     </select>
                   </Field>
-                  <Field label={zh ? "月份" : "Month"}>
+                  <Field label={tx(locale, "Month")}>
                     <select
                       className="input-control focus-ring w-full px-3 text-ink"
                       value={selected.getMonth()}
@@ -2088,23 +2156,23 @@ function CashflowCalendar({
                   onClick={() => setMonthPickerOpen(false)}
                   type="button"
                 >
-                  {zh ? "完成" : "Done"}
+                  {tx(locale, "Done")}
                 </button>
               </div>
             )}
           </div>
           <button className="focus-ring rounded-full border border-line px-3 py-2 text-sm text-titanium hover:text-ink" onClick={() => changeMonth(1)} type="button">
-            {zh ? "下月" : "Next"}
+            {tx(locale, "Next")}
           </button>
         </div>
       </div>
 
       <div className="mb-5 grid grid-cols-2 gap-2 rounded-full border border-line bg-panel/70 p-1 md:inline-grid md:grid-cols-4">
         {[
-          { id: "all", label: zh ? "全部" : "All" },
-          { id: "transactions", label: zh ? "收入 / 支出" : "Income / Expense" },
-          { id: "recurring", label: zh ? "固定 / 訂閱" : "Recurring" },
-          { id: "debt", label: zh ? "貸款 / 債務" : "Debt" },
+          { id: "all", label: tx(locale, "All") },
+          { id: "transactions", label: tx(locale, "Income / Expense") },
+          { id: "recurring", label: tx(locale, "Recurring") },
+          { id: "debt", label: tx(locale, "Debt") },
         ].map((filter) => (
           <button
             className={clsx(
@@ -2164,7 +2232,7 @@ function CashflowCalendar({
           <p className="text-sm font-semibold text-ink">{formatDateOnly(selectedDate, locale)}</p>
           <div className="mt-4 space-y-3">
             {!selectedEvents.length ? (
-              <p className="rounded-2xl border border-line bg-panel/70 p-4 text-sm text-titanium">{zh ? "這天在目前篩選下沒有紀錄或付款提醒。" : "No records or payment reminders for this day in the current filter."}</p>
+              <p className="rounded-2xl border border-line bg-panel/70 p-4 text-sm text-titanium">{tx(locale, "No records or payment reminders for this day in the current filter.")}</p>
             ) : (
               selectedEvents.map((event, index) => (
                 <div className="rounded-2xl border border-line bg-panel/70 p-3" key={`${event.kind}-${event.title}-${index}`}>
@@ -2180,10 +2248,10 @@ function CashflowCalendar({
             )}
           </div>
           <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-titanium">
-            <CalendarLegendDot className="bg-mint" label={zh ? "收入" : "Income"} />
-            <CalendarLegendDot className="bg-rose" label={zh ? "支出" : "Expense"} />
-            <CalendarLegendDot className="bg-[var(--accent)]" label={zh ? "固定" : "Recurring"} />
-            <CalendarLegendDot className="bg-titanium" label={zh ? "債務" : "Debt"} />
+            <CalendarLegendDot className="bg-mint" label={tx(locale, "Income")} />
+            <CalendarLegendDot className="bg-rose" label={tx(locale, "Expense")} />
+            <CalendarLegendDot className="bg-[var(--accent)]" label={tx(locale, "Recurring")} />
+            <CalendarLegendDot className="bg-titanium" label={tx(locale, "Debt")} />
           </div>
         </aside>
       </div>
@@ -2397,12 +2465,12 @@ function CashflowView({
   );
   const categoryOptions = cashflowCategories[form.transaction_type];
   const transactionHistoryTitle = transactionHistoryFilter === "income"
-    ? (zh ? "本月收入明細" : "Monthly income details")
+    ? (tx(locale, "Monthly income details"))
     : transactionHistoryFilter === "expense"
-      ? (zh ? "本月支出明細" : "Monthly expense details")
+      ? (tx(locale, "Monthly expense details"))
       : transactionHistoryFilter === "today"
-        ? (zh ? "今天花費明細" : "Today's expense details")
-        : (zh ? "收入 / 支出歷史紀錄" : "Income / Expense History");
+        ? (tx(locale, "Today's expense details"))
+        : (tx(locale, "Income / Expense History"));
   const transactionHistoryPeriod = transactionHistoryFilter === "today"
     ? formatDateOnly(new Date().toISOString().slice(0, 10), locale)
     : selectedMonthLabel;
@@ -2425,16 +2493,7 @@ function CashflowView({
       <section className="glass-panel apple-card p-5 sm:p-6">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="text-2xl font-semibold tracking-[-0.035em] text-ink">{overviewMode === "monthly" ? (zh ? "每月現金流總覽" : "Monthly cashflow overview") : (zh ? "年現金流總覽" : "Yearly cashflow overview")}</h3>
-            <p className="mt-1 text-sm text-titanium">
-              {overviewMode === "monthly"
-                ? (zh
-                  ? "整合本月收入、支出、固定扣款與債務最低付款。不同幣別會分開顯示。"
-                  : "Combines this month's income, expenses, recurring bills, and minimum debt payments. Currencies stay separated.")
-                : (zh
-                  ? "整合今年收入、支出，並用固定支出與債務最低付款做年化估算。"
-                  : "Combines this year's income and expenses with annualized recurring bills and debt minimums.")}
-            </p>
+            <h3 className="text-2xl font-semibold tracking-[-0.035em] text-ink">{overviewMode === "monthly" ? (tx(locale, "Monthly cashflow overview")) : (tx(locale, "Yearly cashflow overview"))}</h3>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <select
@@ -2442,8 +2501,8 @@ function CashflowView({
               value={overviewMode}
               onChange={(event) => setOverviewMode(event.target.value as "monthly" | "yearly")}
             >
-              <option value="monthly">{zh ? "每月現金流總覽" : "Monthly cashflow overview"}</option>
-              <option value="yearly">{zh ? "年現金流總覽" : "Yearly cashflow overview"}</option>
+              <option value="monthly">{tx(locale, "Monthly cashflow overview")}</option>
+              <option value="yearly">{tx(locale, "Yearly cashflow overview")}</option>
             </select>
             <span className="rounded-full bg-white/10 px-3 py-2 text-xs font-medium text-titanium">
               {overviewPeriodLabel}
@@ -2452,48 +2511,48 @@ function CashflowView({
         </div>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
           <MetricCard
-            actionLabel={overviewMode === "monthly" ? (zh ? "查看本月收入明細" : "View monthly income details") : undefined}
+            actionLabel={overviewMode === "monthly" ? (tx(locale, "View monthly income details")) : undefined}
             icon={<ReceiptText size={20} />}
-            label={overviewMode === "monthly" ? (zh ? "本月收入" : "Monthly income") : (zh ? "今年收入" : "Yearly income")}
+            label={overviewMode === "monthly" ? (tx(locale, "Monthly income")) : (tx(locale, "Yearly income"))}
             onClick={overviewMode === "monthly" ? () => openTransactionHistory("income") : undefined}
             trend={1}
             value={formatCurrencyBuckets(overview.income)}
           />
           <MetricCard
-            actionLabel={overviewMode === "monthly" ? (zh ? "查看本月支出明細" : "View monthly expense details") : undefined}
+            actionLabel={overviewMode === "monthly" ? (tx(locale, "View monthly expense details")) : undefined}
             icon={<ReceiptText size={20} />}
-            label={overviewMode === "monthly" ? (zh ? "本月支出" : "Monthly expenses") : (zh ? "今年支出" : "Yearly expenses")}
+            label={overviewMode === "monthly" ? (tx(locale, "Monthly expenses")) : (tx(locale, "Yearly expenses"))}
             onClick={overviewMode === "monthly" ? () => openTransactionHistory("expense") : undefined}
             trend={-1}
             value={formatCurrencyBuckets(overview.expenses)}
           />
           <MetricCard
-            actionLabel={zh ? "查看固定支出與訂閱明細" : "View recurring expense details"}
+            actionLabel={tx(locale, "View recurring expense details")}
             icon={<RefreshCw size={20} />}
-            label={overviewMode === "monthly" ? (zh ? "固定支出" : "Recurring") : (zh ? "年化固定支出" : "Annualized recurring")}
+            label={overviewMode === "monthly" ? (tx(locale, "Recurring")) : (tx(locale, "Annualized recurring"))}
             onClick={() => setExpandedList("recurring")}
             trend={hasCurrencyValue(overview.recurring) ? -1 : undefined}
             value={formatCurrencyBuckets(overview.recurring)}
           />
           <MetricCard
-            actionLabel={zh ? "查看貸款與債務明細" : "View loan and debt details"}
+            actionLabel={tx(locale, "View loan and debt details")}
             icon={<Activity size={20} />}
-            label={overviewMode === "monthly" ? (zh ? "債務最低付款" : "Debt minimums") : (zh ? "年化債務最低付款" : "Annualized debt minimums")}
+            label={overviewMode === "monthly" ? (tx(locale, "Debt minimums")) : (tx(locale, "Annualized debt minimums"))}
             onClick={() => setExpandedList("debts")}
             trend={hasCurrencyValue(overview.debtPayments) ? -1 : undefined}
             value={formatCurrencyBuckets(overview.debtPayments)}
           />
-          <MetricCard label={zh ? "預估結餘" : "Estimated leftover"} value={formatCurrencyBuckets(overview.leftover)} trend={currencyBucketTotal(overview.leftover)} icon={<CircleDollarSign size={20} />} />
-          <MetricCard label={zh ? "固定壓力" : "Fixed pressure"} value={formatPressureRatio(overview)} trend={-overview.pressureRatio} icon={<BarChart3 size={20} />} />
+          <MetricCard label={tx(locale, "Estimated leftover")} value={formatCurrencyBuckets(overview.leftover)} trend={currencyBucketTotal(overview.leftover)} icon={<CircleDollarSign size={20} />} />
+          <MetricCard label={tx(locale, "Fixed pressure")} value={formatPressureRatio(overview)} trend={-overview.pressureRatio} icon={<BarChart3 size={20} />} />
         </div>
       </section>
 
       <div className="cashflow-mode-switcher grid max-w-[920px] grid-cols-2 gap-1.5 rounded-[22px] border border-line bg-[var(--surface-muted)] p-1.5 sm:grid-cols-4 sm:gap-1 sm:rounded-full sm:p-1">
         {[
-          { icon: <ReceiptText size={17} />, id: "transactions", label: zh ? "收入 / 支出" : "Income / Expense" },
-          { icon: <RefreshCw size={17} />, id: "recurring", label: zh ? "固定支出 / 訂閱" : "Recurring / Subscriptions" },
-          { icon: <Activity size={17} />, id: "debts", label: zh ? "貸款 / 債務" : "Loans / Debt" },
-          { icon: <BarChart3 size={17} />, id: "budgets", label: zh ? "預算" : "Budgets" },
+          { icon: <ReceiptText size={17} />, id: "transactions", label: tx(locale, "Income / Expense") },
+          { icon: <RefreshCw size={17} />, id: "recurring", label: tx(locale, "Recurring / Subscriptions") },
+          { icon: <Activity size={17} />, id: "debts", label: tx(locale, "Loans / Debt") },
+          { icon: <BarChart3 size={17} />, id: "budgets", label: tx(locale, "Budgets") },
         ].map((item) => {
           const selected = cashflowMode === item.id;
           return (
@@ -2521,12 +2580,12 @@ function CashflowView({
         <section className="glass-panel apple-card self-start p-5 sm:p-6">
         <div className="mb-5 flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-2xl font-semibold tracking-[-0.035em] text-ink">{editingId ? (zh ? "編輯紀錄" : "Edit record") : (zh ? "新增收入 / 支出" : "Add income / expense")}</h3>
-            <p className="mt-1 text-sm text-titanium">{zh ? "先用手動輸入紀錄現金流，之後再接自動同步。" : "Manual cashflow entry first; automation can come later."}</p>
+            <h3 className="text-2xl font-semibold tracking-[-0.035em] text-ink">{editingId ? (tx(locale, "Edit record")) : (tx(locale, "Add income / expense"))}</h3>
+            <p className="mt-1 text-sm text-titanium">{tx(locale, "Manual cashflow entry first; automation can come later.")}</p>
           </div>
           {editingId && (
             <button className="focus-ring rounded-full border border-line px-3 py-2 text-xs text-titanium hover:text-ink" onClick={onReset} type="button">
-              {zh ? "取消編輯" : "Cancel edit"}
+              {tx(locale, "Cancel edit")}
             </button>
           )}
         </div>
@@ -2538,22 +2597,22 @@ function CashflowView({
               onClick={() => onUpdateForm("transaction_type", "expense")}
               type="button"
             >
-              {zh ? "支出" : "Expense"}
+              {tx(locale, "Expense")}
             </button>
             <button
               className={clsx("focus-ring min-h-11 rounded-full text-sm font-medium", form.transaction_type === "income" ? "primary-button" : "text-titanium hover:text-ink")}
               onClick={() => onUpdateForm("transaction_type", "income")}
               type="button"
             >
-              {zh ? "收入" : "Income"}
+              {tx(locale, "Income")}
             </button>
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label={zh ? "日期" : "Date"}>
+            <Field label={tx(locale, "Date")}>
               <input className="input-control focus-ring w-full px-3 text-ink" type="date" value={form.transaction_date} onChange={(event) => onUpdateForm("transaction_date", event.target.value)} required />
             </Field>
-            <Field label={zh ? "幣別" : "Currency"}>
+            <Field label={tx(locale, "Currency")}>
               <select className="input-control focus-ring w-full px-3 text-ink" value={form.currency} onChange={(event) => onUpdateForm("currency", event.target.value as Currency)}>
                 <option value="USD">USD</option>
                 <option value="TWD">TWD</option>
@@ -2561,7 +2620,7 @@ function CashflowView({
             </Field>
           </div>
 
-          <Field label={zh ? "金額" : "Amount"}>
+          <Field label={tx(locale, "Amount")}>
             <input
               className="input-control focus-ring w-full px-3 text-ink"
               inputMode="decimal"
@@ -2579,7 +2638,7 @@ function CashflowView({
             />
           </Field>
 
-          <Field label={zh ? "分類" : "Category"}>
+          <Field label={tx(locale, "Category")}>
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 xl:grid-cols-5">
               {categoryOptions.map((category) => {
                 const CategoryIcon = cashflowCategoryIcons[category.id as keyof typeof cashflowCategoryIcons] ?? Ellipsis;
@@ -2606,22 +2665,22 @@ function CashflowView({
           </Field>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label={zh ? "項目名稱" : "Description"}>
+            <Field label={tx(locale, "Description")}>
               <input
                 className="input-control focus-ring w-full px-3 text-ink"
-                placeholder={zh ? "例如：午餐、薪水、Uber" : "e.g. Lunch, paycheck, Uber"}
+                placeholder={tx(locale, "e.g. Lunch, paycheck, Uber")}
                 value={form.description}
                 onChange={(event) => onUpdateForm("description", event.target.value)}
               />
             </Field>
 
-            <Field label={zh ? "付款方式" : "Payment method"}>
+            <Field label={tx(locale, "Payment method")}>
               <select
                 className="input-control focus-ring w-full px-3 text-ink"
                 value={form.payment_method}
                 onChange={(event) => onUpdateForm("payment_method", event.target.value)}
               >
-                <option value="">{zh ? "選擇付款方式" : "Select payment method"}</option>
+                <option value="">{tx(locale, "Select payment method")}</option>
                 {paymentMethods.map((method) => (
                   <option key={method.value} value={method.value}>{zh ? method.zh : method.en}</option>
                 ))}
@@ -2629,10 +2688,10 @@ function CashflowView({
             </Field>
           </div>
 
-          <Field label={zh ? "備註" : "Notes"}>
+          <Field label={tx(locale, "Notes")}>
             <textarea
               className="input-control focus-ring min-h-24 w-full resize-none px-3 py-3 text-ink"
-              placeholder={zh ? "可選填" : "Optional"}
+              placeholder={tx(locale, "Optional")}
               value={form.notes}
               onChange={(event) => onUpdateForm("notes", event.target.value)}
             />
@@ -2640,7 +2699,7 @@ function CashflowView({
 
           <button className="primary-button focus-ring flex min-h-12 w-full items-center justify-center gap-2 rounded-full px-4 font-medium" type="submit">
             <Plus size={17} />
-            {editingId ? (zh ? "更新紀錄" : "Update record") : (zh ? "儲存紀錄" : "Save record")}
+            {editingId ? (tx(locale, "Update record")) : (tx(locale, "Save record"))}
           </button>
         </form>
         </section>
@@ -2648,16 +2707,16 @@ function CashflowView({
         <section className="space-y-5">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <MetricCard
-            actionLabel={zh ? "查看本月全部收支" : "View all monthly transactions"}
+            actionLabel={tx(locale, "View all monthly transactions")}
             icon={<CircleDollarSign size={20} />}
-            label={zh ? "本月結餘" : "Monthly net"}
+            label={tx(locale, "Monthly net")}
             onClick={() => openTransactionHistory("all")}
             value={netTotal}
           />
           <MetricCard
-            actionLabel={zh ? "查看今天花費明細" : "View today's expense details"}
+            actionLabel={tx(locale, "View today's expense details")}
             icon={<Activity size={20} />}
-            label={zh ? "今天花費" : "Spent today"}
+            label={tx(locale, "Spent today")}
             onClick={() => openTransactionHistory("today")}
             trend={todayExpenses.length ? -1 : undefined}
             value={todayTotal}
@@ -2674,11 +2733,11 @@ function CashflowView({
         <section className="glass-panel apple-card self-start p-5">
           <div className="mb-5 flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-xl font-semibold text-ink">{zh ? "月份紀錄" : "Monthly records"}</h3>
+              <h3 className="text-xl font-semibold text-ink">{tx(locale, "Monthly records")}</h3>
               <p className="mt-1 text-sm text-titanium">{zh ? `${selectedMonthLabel} 的收入與支出。` : `Income and expenses for ${selectedMonthLabel}.`}</p>
             </div>
             <button
-              aria-label={zh ? "放大檢視月份紀錄" : "Expand monthly records"}
+              aria-label={tx(locale, "Expand monthly records")}
               className="focus-ring rounded-full border border-line p-2 text-titanium transition hover:bg-white/10 hover:text-ink"
               onClick={() => {
                 setTransactionHistoryFilter("all");
@@ -2692,18 +2751,18 @@ function CashflowView({
 
           {!selectedMonthTransactions.length ? (
             <div className="subtle-panel apple-card-sm p-8 text-center text-titanium">
-              {zh ? "這個月份目前沒有收入或支出紀錄。" : "There are no income or expense records for this month."}
+              {tx(locale, "There are no income or expense records for this month.")}
             </div>
           ) : (
             <div className="max-h-[430px] overflow-auto rounded-[18px] border border-line">
               <table className="w-full min-w-[760px] border-collapse text-left text-sm">
                 <thead className="sticky top-0 z-10 bg-panel text-xs uppercase tracking-[0.08em] text-titanium">
                   <tr>
-                    <th className="px-4 py-3">{zh ? "日期" : "Date"}</th>
-                    <th className="px-4 py-3">{zh ? "項目" : "Description"}</th>
-                    <th className="px-4 py-3">{zh ? "分類" : "Category"}</th>
-                    <th className="px-4 py-3">{zh ? "方式" : "Method"}</th>
-                    <th className="px-4 py-3 text-right">{zh ? "金額" : "Amount"}</th>
+                    <th className="px-4 py-3">{tx(locale, "Date")}</th>
+                    <th className="px-4 py-3">{tx(locale, "Description")}</th>
+                    <th className="px-4 py-3">{tx(locale, "Category")}</th>
+                    <th className="px-4 py-3">{tx(locale, "Method")}</th>
+                    <th className="px-4 py-3 text-right">{tx(locale, "Amount")}</th>
                     <th className="px-4 py-3 text-right"></th>
                   </tr>
                 </thead>
@@ -2748,21 +2807,21 @@ function CashflowView({
         <section className="glass-panel apple-card self-start p-5">
           <div className="mb-5 flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-2xl font-semibold tracking-[-0.035em] text-ink">{recurringEditingId ? (zh ? "編輯固定支出" : "Edit recurring expense") : (zh ? "新增固定支出 / 訂閱" : "Add recurring expense / subscription")}</h3>
-              <p className="mt-1 text-sm text-titanium">{zh ? "例如 Netflix、手機費、保險、房租。先手動管理，之後再看哪些可自動串聯。" : "For Netflix, phone bills, insurance, rent, and subscriptions. Manual first; automation later."}</p>
+              <h3 className="text-2xl font-semibold tracking-[-0.035em] text-ink">{recurringEditingId ? (tx(locale, "Edit recurring expense")) : (tx(locale, "Add recurring expense / subscription"))}</h3>
+              <p className="mt-1 text-sm text-titanium">{tx(locale, "For Netflix, phone bills, insurance, rent, and subscriptions. Manual first; automation later.")}</p>
             </div>
             {recurringEditingId && (
               <button className="focus-ring rounded-full border border-line px-3 py-2 text-xs text-titanium hover:text-ink" onClick={onResetRecurring} type="button">
-                {zh ? "取消編輯" : "Cancel edit"}
+                {tx(locale, "Cancel edit")}
               </button>
             )}
           </div>
 
           <form className="space-y-4" onSubmit={onSaveRecurring}>
-            <Field label={zh ? "名稱" : "Name"}>
+            <Field label={tx(locale, "Name")}>
               <input
                 className="input-control focus-ring w-full px-3 text-ink"
-                placeholder={zh ? "例如：Netflix、房租、保險" : "e.g. Netflix, rent, insurance"}
+                placeholder={tx(locale, "e.g. Netflix, rent, insurance")}
                 value={recurringForm.name}
                 onChange={(event) => onUpdateRecurringForm("name", event.target.value)}
                 required
@@ -2770,7 +2829,7 @@ function CashflowView({
             </Field>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label={zh ? "金額" : "Amount"}>
+              <Field label={tx(locale, "Amount")}>
                 <input
                   className="input-control focus-ring w-full px-3 text-ink"
                   inputMode="decimal"
@@ -2787,7 +2846,7 @@ function CashflowView({
                   required
                 />
               </Field>
-              <Field label={zh ? "幣別" : "Currency"}>
+              <Field label={tx(locale, "Currency")}>
                 <select className="input-control focus-ring w-full px-3 text-ink" value={recurringForm.currency} onChange={(event) => onUpdateRecurringForm("currency", event.target.value as Currency)}>
                   <option value="USD">USD</option>
                   <option value="TWD">TWD</option>
@@ -2796,18 +2855,18 @@ function CashflowView({
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label={zh ? "週期" : "Frequency"}>
+              <Field label={tx(locale, "Frequency")}>
                 <select className="input-control focus-ring w-full px-3 text-ink" value={recurringForm.frequency} onChange={(event) => onUpdateRecurringForm("frequency", event.target.value as RecurringExpenseInput["frequency"])}>
-                  <option value="monthly">{zh ? "每月" : "Monthly"}</option>
-                  <option value="yearly">{zh ? "每年" : "Yearly"}</option>
+                  <option value="monthly">{tx(locale, "Monthly")}</option>
+                  <option value="yearly">{tx(locale, "Yearly")}</option>
                 </select>
               </Field>
-              <Field label={zh ? "下次扣款日" : "Next due date"}>
+              <Field label={tx(locale, "Next due date")}>
                 <input className="input-control focus-ring w-full px-3 text-ink" type="date" value={recurringForm.next_due_date} onChange={(event) => onUpdateRecurringForm("next_due_date", event.target.value)} required />
               </Field>
             </div>
 
-            <Field label={zh ? "分類" : "Category"}>
+            <Field label={tx(locale, "Category")}>
               <select className="input-control focus-ring w-full px-3 text-ink" value={recurringForm.category} onChange={(event) => onUpdateRecurringForm("category", event.target.value)}>
                 {recurringCategories.map((category) => (
                   <option key={category.id} value={category.id}>{zh ? category.zh : category.en}</option>
@@ -2815,13 +2874,13 @@ function CashflowView({
               </select>
             </Field>
 
-            <Field label={zh ? "付款方式" : "Payment method"}>
+            <Field label={tx(locale, "Payment method")}>
               <select
                 className="input-control focus-ring w-full px-3 text-ink"
                 value={recurringForm.payment_method}
                 onChange={(event) => onUpdateRecurringForm("payment_method", event.target.value)}
               >
-                <option value="">{zh ? "選擇付款方式" : "Select payment method"}</option>
+                <option value="">{tx(locale, "Select payment method")}</option>
                 {paymentMethods.map((method) => (
                   <option key={method.value} value={method.value}>{zh ? method.zh : method.en}</option>
                 ))}
@@ -2830,24 +2889,24 @@ function CashflowView({
 
             <label className="input-control flex items-center gap-3 px-3 text-sm text-ink">
               <input checked={recurringForm.is_active} onChange={(event) => onUpdateRecurringForm("is_active", event.target.checked)} type="checkbox" />
-              {zh ? "仍在使用 / 持續扣款" : "Active / still billing"}
+              {tx(locale, "Active / still billing")}
             </label>
 
             <label className="input-control flex items-center gap-3 px-3 text-sm text-ink">
               <input checked={recurringForm.is_subscription} onChange={(event) => onUpdateRecurringForm("is_subscription", event.target.checked)} type="checkbox" />
-              {zh ? "這是一個訂閱服務" : "This is a subscription"}
+              {tx(locale, "This is a subscription")}
             </label>
 
             {recurringForm.is_subscription && (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Field label={zh ? "使用狀態" : "Usage status"}>
+                <Field label={tx(locale, "Usage status")}>
                   <select className="input-control focus-ring w-full px-3 text-ink" value={recurringForm.usage_status} onChange={(event) => onUpdateRecurringForm("usage_status", event.target.value as RecurringExpenseInput["usage_status"])}>
                     {subscriptionUsageStatuses.map((status) => (
                       <option key={status.id} value={status.id}>{zh ? status.zh : status.en}</option>
                     ))}
                   </select>
                 </Field>
-                <Field label={zh ? "扣款前提醒天數" : "Reminder days before charge"}>
+                <Field label={tx(locale, "Reminder days before charge")}>
                   <input
                     className="input-control focus-ring w-full px-3 text-ink"
                     inputMode="numeric"
@@ -2866,10 +2925,10 @@ function CashflowView({
               </div>
             )}
 
-            <Field label={zh ? "備註" : "Notes"}>
+            <Field label={tx(locale, "Notes")}>
               <textarea
                 className="input-control focus-ring min-h-24 w-full resize-none px-3 py-3 text-ink"
-                placeholder={zh ? "可選填" : "Optional"}
+                placeholder={tx(locale, "Optional")}
                 value={recurringForm.notes}
                 onChange={(event) => onUpdateRecurringForm("notes", event.target.value)}
               />
@@ -2877,26 +2936,26 @@ function CashflowView({
 
             <button className="primary-button focus-ring flex min-h-12 w-full items-center justify-center gap-2 rounded-full px-4 font-medium" type="submit">
               <Plus size={17} />
-              {recurringEditingId ? (zh ? "更新固定支出" : "Update recurring expense") : (zh ? "儲存固定支出" : "Save recurring expense")}
+              {recurringEditingId ? (tx(locale, "Update recurring expense")) : (tx(locale, "Save recurring expense"))}
             </button>
           </form>
         </section>
 
         <section className="space-y-5">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <MetricCard label={zh ? "每月固定支出" : "Monthly recurring"} value={recurringMonthlyTotal} trend={activeRecurringExpenses.length ? -1 : undefined} icon={<ReceiptText size={20} />} />
-            <MetricCard label={zh ? "訂閱年化成本" : "Subscription annual cost"} value={subscriptionAnnualTotal} trend={activeSubscriptions.length ? -1 : undefined} icon={<ReceiptText size={20} />} />
-            <MetricCard label={zh ? "可檢視項目" : "Review candidates"} value={String(subscriptionsToReview.length)} trend={subscriptionsToReview.length ? -1 : undefined} icon={<ListChecks size={20} />} />
+            <MetricCard label={tx(locale, "Monthly recurring")} value={recurringMonthlyTotal} trend={activeRecurringExpenses.length ? -1 : undefined} icon={<ReceiptText size={20} />} />
+            <MetricCard label={tx(locale, "Subscription annual cost")} value={subscriptionAnnualTotal} trend={activeSubscriptions.length ? -1 : undefined} icon={<ReceiptText size={20} />} />
+            <MetricCard label={tx(locale, "Review candidates")} value={String(subscriptionsToReview.length)} trend={subscriptionsToReview.length ? -1 : undefined} icon={<ListChecks size={20} />} />
           </div>
 
           <section className="glass-panel apple-card p-5">
             <div className="mb-5 flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-xl font-semibold text-ink">{zh ? "固定支出與訂閱" : "Recurring expenses and subscriptions"}</h3>
-                <p className="mt-1 text-sm text-titanium">{zh ? "依下次扣款日排序，未啟用項目會保留但不計入摘要。" : "Sorted by next due date. Inactive items are kept but excluded from summaries."}</p>
+                <h3 className="text-xl font-semibold text-ink">{tx(locale, "Recurring expenses and subscriptions")}</h3>
+                <p className="mt-1 text-sm text-titanium">{tx(locale, "Sorted by next due date. Inactive items are kept but excluded from summaries.")}</p>
               </div>
               <button
-                aria-label={zh ? "放大檢視固定支出與訂閱" : "Expand recurring expenses and subscriptions"}
+                aria-label={tx(locale, "Expand recurring expenses and subscriptions")}
                 className="focus-ring rounded-full border border-line p-2 text-titanium transition hover:bg-white/10 hover:text-ink"
                 onClick={() => setExpandedList("recurring")}
                 type="button"
@@ -2907,7 +2966,7 @@ function CashflowView({
 
             {!recurringExpenses.length ? (
               <div className="subtle-panel apple-card-sm p-8 text-center text-titanium">
-                {zh ? "新增第一筆固定支出後，這裡會顯示你的訂閱與固定扣款。" : "Add your first recurring expense to track subscriptions and fixed bills."}
+                {tx(locale, "Add your first recurring expense to track subscriptions and fixed bills.")}
               </div>
             ) : (
               <div className="grid max-h-[520px] gap-3 overflow-y-auto pr-1">
@@ -2919,7 +2978,7 @@ function CashflowView({
                         <span className="min-w-0">
                           <span className="block truncate font-semibold text-ink">{expense.name}</span>
                           <span className="mt-1 block text-xs text-titanium">
-                            {getRecurringCategoryLabel(expense.category, locale)} · {expense.frequency === "monthly" ? (zh ? "每月" : "Monthly") : (zh ? "每年" : "Yearly")}
+                            {getRecurringCategoryLabel(expense.category, locale)} · {expense.frequency === "monthly" ? (tx(locale, "Monthly")) : (tx(locale, "Yearly"))}
                           </span>
                           {expense.is_subscription && (
                             <span className="mt-2 inline-flex rounded-full bg-white/10 px-2.5 py-1 text-xs text-titanium">
@@ -2930,17 +2989,17 @@ function CashflowView({
                       </button>
                       <div className="text-right">
                         <p className="font-semibold text-ink">{formatCurrency(expense.amount, expense.currency)}</p>
-                        {expense.is_subscription && <p className="mt-1 text-xs text-titanium">{zh ? "年化" : "Annual"}: {formatRecurringAnnualizedAmount(expense)}</p>}
-                        <p className="mt-1 text-xs text-titanium">{zh ? "下次" : "Next"}: {formatDateOnly(expense.next_due_date, locale)}</p>
+                        {expense.is_subscription && <p className="mt-1 text-xs text-titanium">{tx(locale, "Annual")}: {formatRecurringAnnualizedAmount(expense)}</p>}
+                        <p className="mt-1 text-xs text-titanium">{tx(locale, "Next")}: {formatDateOnly(expense.next_due_date, locale)}</p>
                       </div>
                     </div>
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                       <p className="text-xs text-titanium">{getPaymentMethodLabel(expense.payment_method, locale)}</p>
                       <div className="flex items-center gap-2">
                         {expense.is_subscription && daysUntil(expense.next_due_date) <= (expense.reminder_days ?? 3) && (
-                          <span className="rounded-full bg-amber/10 px-2.5 py-1 text-xs text-amber">{zh ? "即將扣款" : "Due soon"}</span>
+                          <span className="rounded-full bg-amber/10 px-2.5 py-1 text-xs text-amber">{tx(locale, "Due soon")}</span>
                         )}
-                        {!expense.is_active && <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs text-titanium">{zh ? "未啟用" : "Inactive"}</span>}
+                        {!expense.is_active && <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs text-titanium">{tx(locale, "Inactive")}</span>}
                         <button
                           aria-label={zh ? `刪除 ${expense.name}` : `Delete ${expense.name}`}
                           className="focus-ring rounded-xl border border-line p-2 text-titanium transition hover:bg-rose/10 hover:text-rose"
@@ -2959,16 +3018,16 @@ function CashflowView({
 
           {subscriptionsToReview.length > 0 && (
             <section className="glass-panel apple-card p-5">
-              <h3 className="mb-4 text-xl font-semibold text-ink">{zh ? "可考慮檢視 / 取消" : "Review or cancel candidates"}</h3>
+              <h3 className="mb-4 text-xl font-semibold text-ink">{tx(locale, "Review or cancel candidates")}</h3>
               <div className="space-y-3">
                 {subscriptionsToReview.map((expense) => (
                   <div className="flex items-center justify-between gap-4 rounded-2xl border border-amber/20 bg-amber/5 p-3 text-sm" key={expense.id}>
                     <div>
                       <p className="font-medium text-ink">{expense.name}</p>
-                      <p className="text-xs text-titanium">{getSubscriptionUsageLabel(expense.usage_status ?? "active", locale)} · {formatRecurringAnnualizedAmount(expense)} / {zh ? "年" : "year"}</p>
+                      <p className="text-xs text-titanium">{getSubscriptionUsageLabel(expense.usage_status ?? "active", locale)} · {formatRecurringAnnualizedAmount(expense)} / {tx(locale, "year")}</p>
                     </div>
                     <button className="focus-ring rounded-full border border-line px-3 py-2 text-xs text-titanium hover:text-ink" onClick={() => onEditRecurring(expense)} type="button">
-                      {zh ? "檢視" : "Review"}
+                      {tx(locale, "Review")}
                     </button>
                   </div>
                 ))}
@@ -2978,13 +3037,13 @@ function CashflowView({
 
           {upcomingSubscriptionAlerts.length > 0 && (
             <section className="glass-panel apple-card p-5">
-              <h3 className="mb-4 text-xl font-semibold text-ink">{zh ? "訂閱扣款提醒" : "Subscription charge reminders"}</h3>
+              <h3 className="mb-4 text-xl font-semibold text-ink">{tx(locale, "Subscription charge reminders")}</h3>
               <div className="space-y-3">
                 {upcomingSubscriptionAlerts.map((expense) => (
                   <div className="flex items-center justify-between gap-4 text-sm" key={expense.id}>
                     <div>
                       <p className="font-medium text-ink">{expense.name}</p>
-                      <p className="text-xs text-titanium">{zh ? "剩餘" : "In"} {Math.max(0, daysUntil(expense.next_due_date))} {zh ? "天" : "days"}</p>
+                      <p className="text-xs text-titanium">{tx(locale, "In")} {Math.max(0, daysUntil(expense.next_due_date))} {tx(locale, "days")}</p>
                     </div>
                     <p className="font-semibold text-ink">{formatCurrency(expense.amount, expense.currency)}</p>
                   </div>
@@ -2995,7 +3054,7 @@ function CashflowView({
 
           {upcomingRecurringExpenses.length > 0 && (
             <section className="glass-panel apple-card p-5">
-              <h3 className="mb-4 text-xl font-semibold text-ink">{zh ? "近期扣款" : "Upcoming charges"}</h3>
+              <h3 className="mb-4 text-xl font-semibold text-ink">{tx(locale, "Upcoming charges")}</h3>
               <div className="space-y-3">
                 {upcomingRecurringExpenses.map((expense) => (
                   <div className="flex items-center justify-between gap-4 text-sm" key={expense.id}>
@@ -3018,28 +3077,28 @@ function CashflowView({
         <section className="glass-panel apple-card self-start p-5">
           <div className="mb-5 flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-2xl font-semibold tracking-[-0.035em] text-ink">{debtEditingId ? (zh ? "編輯貸款 / 債務" : "Edit loan / debt") : (zh ? "新增貸款 / 債務" : "Add loan / debt")}</h3>
-              <p className="mt-1 text-sm text-titanium">{zh ? "手動追蹤房貸、車貸、學貸、信用卡分期與其他債務。" : "Manually track mortgages, car loans, student loans, credit cards, and other debts."}</p>
+              <h3 className="text-2xl font-semibold tracking-[-0.035em] text-ink">{debtEditingId ? (tx(locale, "Edit loan / debt")) : (tx(locale, "Add loan / debt"))}</h3>
+              <p className="mt-1 text-sm text-titanium">{tx(locale, "Manually track mortgages, car loans, student loans, credit cards, and other debts.")}</p>
             </div>
             {debtEditingId && (
               <button className="focus-ring rounded-full border border-line px-3 py-2 text-xs text-titanium hover:text-ink" onClick={onResetDebt} type="button">
-                {zh ? "取消編輯" : "Cancel edit"}
+                {tx(locale, "Cancel edit")}
               </button>
             )}
           </div>
 
           <form className="space-y-4" onSubmit={onSaveDebt}>
-            <Field label={zh ? "名稱" : "Name"}>
+            <Field label={tx(locale, "Name")}>
               <input
                 className="input-control focus-ring w-full px-3 text-ink"
-                placeholder={zh ? "例如：房貸、車貸、信用卡分期" : "e.g. Mortgage, car loan, card installment"}
+                placeholder={tx(locale, "e.g. Mortgage, car loan, card installment")}
                 value={debtForm.name}
                 onChange={(event) => onUpdateDebtForm("name", event.target.value)}
                 required
               />
             </Field>
 
-            <Field label={zh ? "類型" : "Type"}>
+            <Field label={tx(locale, "Type")}>
               <select className="input-control focus-ring w-full px-3 text-ink" value={debtForm.debt_type} onChange={(event) => onUpdateDebtForm("debt_type", event.target.value as DebtType)}>
                 {debtTypes.map((type) => (
                   <option key={type.id} value={type.id}>{zh ? type.zh : type.en}</option>
@@ -3048,39 +3107,39 @@ function CashflowView({
             </Field>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label={zh ? "原始本金" : "Original principal"}>
+              <Field label={tx(locale, "Original principal")}>
                 <NumericInput value={debtForm.original_principal} onChange={(value) => onUpdateDebtForm("original_principal", value)} />
               </Field>
-              <Field label={zh ? "剩餘本金" : "Remaining principal"}>
+              <Field label={tx(locale, "Remaining principal")}>
                 <NumericInput value={debtForm.remaining_principal} onChange={(value) => onUpdateDebtForm("remaining_principal", value)} />
               </Field>
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label={zh ? "幣別" : "Currency"}>
+              <Field label={tx(locale, "Currency")}>
                 <select className="input-control focus-ring w-full px-3 text-ink" value={debtForm.currency} onChange={(event) => onUpdateDebtForm("currency", event.target.value as Currency)}>
                   <option value="USD">USD</option>
                   <option value="TWD">TWD</option>
                 </select>
               </Field>
-              <Field label={zh ? "年利率 %" : "APR %"}>
+              <Field label={tx(locale, "APR %")}>
                 <NumericInput value={debtForm.interest_rate} onChange={(value) => onUpdateDebtForm("interest_rate", value)} />
               </Field>
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label={zh ? "每月最低付款" : "Monthly payment"}>
+              <Field label={tx(locale, "Monthly payment")}>
                 <NumericInput value={debtForm.minimum_payment} onChange={(value) => onUpdateDebtForm("minimum_payment", value)} />
               </Field>
-              <Field label={zh ? "下次付款日" : "Next payment date"}>
+              <Field label={tx(locale, "Next payment date")}>
                 <input className="input-control focus-ring w-full px-3 text-ink" type="date" value={debtForm.next_payment_date} onChange={(event) => onUpdateDebtForm("next_payment_date", event.target.value)} required />
               </Field>
             </div>
 
-            <Field label={zh ? "貸款機構" : "Lender"}>
+            <Field label={tx(locale, "Lender")}>
               <input
                 className="input-control focus-ring w-full px-3 text-ink"
-                placeholder={zh ? "銀行、信用卡公司、私人借款" : "Bank, card issuer, private lender"}
+                placeholder={tx(locale, "Bank, card issuer, private lender")}
                 value={debtForm.lender}
                 onChange={(event) => onUpdateDebtForm("lender", event.target.value)}
               />
@@ -3088,13 +3147,13 @@ function CashflowView({
 
             <label className="input-control flex items-center gap-3 px-3 text-sm text-ink">
               <input checked={debtForm.is_active} onChange={(event) => onUpdateDebtForm("is_active", event.target.checked)} type="checkbox" />
-              {zh ? "仍需追蹤 / 尚未還清" : "Active / still owed"}
+              {tx(locale, "Active / still owed")}
             </label>
 
-            <Field label={zh ? "備註" : "Notes"}>
+            <Field label={tx(locale, "Notes")}>
               <textarea
                 className="input-control focus-ring min-h-24 w-full resize-none px-3 py-3 text-ink"
-                placeholder={zh ? "可選填" : "Optional"}
+                placeholder={tx(locale, "Optional")}
                 value={debtForm.notes}
                 onChange={(event) => onUpdateDebtForm("notes", event.target.value)}
               />
@@ -3102,26 +3161,26 @@ function CashflowView({
 
             <button className="primary-button focus-ring flex min-h-12 w-full items-center justify-center gap-2 rounded-full px-4 font-medium" type="submit">
               <Plus size={17} />
-              {debtEditingId ? (zh ? "更新債務" : "Update debt") : (zh ? "儲存債務" : "Save debt")}
+              {debtEditingId ? (tx(locale, "Update debt")) : (tx(locale, "Save debt"))}
             </button>
           </form>
         </section>
 
         <section className="space-y-5">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <MetricCard label={zh ? "剩餘債務" : "Remaining debt"} value={totalDebtPrincipal} trend={activeDebts.length ? -1 : undefined} icon={<ReceiptText size={20} />} />
-            <MetricCard label={zh ? "每月最低付款" : "Monthly minimums"} value={totalDebtMonthlyPayment} trend={activeDebts.length ? -1 : undefined} icon={<ReceiptText size={20} />} />
-            <MetricCard label={zh ? "最高利率" : "Highest APR"} value={highestInterestDebt ? `${highestInterestDebt.interest_rate.toFixed(2)}%` : "0.00%"} trend={highestInterestDebt?.interest_rate ? -1 : undefined} icon={<Activity size={20} />} />
+            <MetricCard label={tx(locale, "Remaining debt")} value={totalDebtPrincipal} trend={activeDebts.length ? -1 : undefined} icon={<ReceiptText size={20} />} />
+            <MetricCard label={tx(locale, "Monthly minimums")} value={totalDebtMonthlyPayment} trend={activeDebts.length ? -1 : undefined} icon={<ReceiptText size={20} />} />
+            <MetricCard label={tx(locale, "Highest APR")} value={highestInterestDebt ? `${highestInterestDebt.interest_rate.toFixed(2)}%` : "0.00%"} trend={highestInterestDebt?.interest_rate ? -1 : undefined} icon={<Activity size={20} />} />
           </div>
 
           <section className="glass-panel apple-card p-5">
             <div className="mb-5 flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-xl font-semibold text-ink">{zh ? "貸款與債務" : "Loans and debts"}</h3>
-                <p className="mt-1 text-sm text-titanium">{zh ? "依下次付款日排序，未啟用項目保留但不計入摘要。" : "Sorted by next payment date. Inactive debts are kept but excluded from summaries."}</p>
+                <h3 className="text-xl font-semibold text-ink">{tx(locale, "Loans and debts")}</h3>
+                <p className="mt-1 text-sm text-titanium">{tx(locale, "Sorted by next payment date. Inactive debts are kept but excluded from summaries.")}</p>
               </div>
               <button
-                aria-label={zh ? "放大檢視貸款與債務" : "Expand loans and debts"}
+                aria-label={tx(locale, "Expand loans and debts")}
                 className="focus-ring rounded-full border border-line p-2 text-titanium transition hover:bg-white/10 hover:text-ink"
                 onClick={() => setExpandedList("debts")}
                 type="button"
@@ -3132,7 +3191,7 @@ function CashflowView({
 
             {!debts.length ? (
               <div className="subtle-panel apple-card-sm p-8 text-center text-titanium">
-                {zh ? "新增第一筆債務後，這裡會顯示剩餘本金與付款資訊。" : "Add your first debt to track principal and payment details."}
+                {tx(locale, "Add your first debt to track principal and payment details.")}
               </div>
             ) : (
               <div className="grid max-h-[520px] gap-3 overflow-y-auto pr-1">
@@ -3141,17 +3200,17 @@ function CashflowView({
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <button className="text-left" onClick={() => onEditDebt(debt)} type="button">
                         <span className="block font-semibold text-ink">{debt.name}</span>
-                        <span className="mt-1 block text-xs text-titanium">{getDebtTypeLabel(debt.debt_type, locale)} · {debt.lender || (zh ? "未設定機構" : "No lender")}</span>
+                        <span className="mt-1 block text-xs text-titanium">{getDebtTypeLabel(debt.debt_type, locale)} · {debt.lender || (tx(locale, "No lender"))}</span>
                       </button>
                       <div className="text-right">
                         <p className="font-semibold text-ink">{formatCurrency(debt.remaining_principal, debt.currency)}</p>
-                        <p className="mt-1 text-xs text-titanium">{zh ? "利率" : "APR"}: {debt.interest_rate.toFixed(2)}%</p>
+                        <p className="mt-1 text-xs text-titanium">{tx(locale, "APR")}: {debt.interest_rate.toFixed(2)}%</p>
                       </div>
                     </div>
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                      <p className="text-xs text-titanium">{zh ? "下次付款" : "Next payment"}: {formatDateOnly(debt.next_payment_date, locale)} · {formatCurrency(debt.minimum_payment, debt.currency)}</p>
+                      <p className="text-xs text-titanium">{tx(locale, "Next payment")}: {formatDateOnly(debt.next_payment_date, locale)} · {formatCurrency(debt.minimum_payment, debt.currency)}</p>
                       <div className="flex items-center gap-2">
-                        {!debt.is_active && <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs text-titanium">{zh ? "未啟用" : "Inactive"}</span>}
+                        {!debt.is_active && <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs text-titanium">{tx(locale, "Inactive")}</span>}
                         <button
                           aria-label={zh ? `刪除 ${debt.name}` : `Delete ${debt.name}`}
                           className="focus-ring rounded-xl border border-line p-2 text-titanium transition hover:bg-rose/10 hover:text-rose"
@@ -3170,7 +3229,7 @@ function CashflowView({
 
           {upcomingDebtPayments.length > 0 && (
             <section className="glass-panel apple-card p-5">
-              <h3 className="mb-4 text-xl font-semibold text-ink">{zh ? "近期債務付款" : "Upcoming debt payments"}</h3>
+              <h3 className="mb-4 text-xl font-semibold text-ink">{tx(locale, "Upcoming debt payments")}</h3>
               <div className="space-y-3">
                 {upcomingDebtPayments.map((debt) => (
                   <div className="flex items-center justify-between gap-4 text-sm" key={debt.id}>
@@ -3193,22 +3252,22 @@ function CashflowView({
         <section className="glass-panel apple-card p-5">
           <div className="mb-5 flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-2xl font-semibold tracking-[-0.035em] text-ink">{budgetEditingId ? (zh ? "編輯預算" : "Edit budget") : (zh ? "新增每月預算" : "Add monthly budget")}</h3>
-              <p className="mt-1 text-sm text-titanium">{zh ? "設定每月分類預算，系統會用本月支出自動計算剩餘與超支。" : "Set category budgets and compare them with this month's expenses."}</p>
+              <h3 className="text-2xl font-semibold tracking-[-0.035em] text-ink">{budgetEditingId ? (tx(locale, "Edit budget")) : (tx(locale, "Add monthly budget"))}</h3>
+              <p className="mt-1 text-sm text-titanium">{tx(locale, "Set category budgets and compare them with this month's expenses.")}</p>
             </div>
             {budgetEditingId && (
               <button className="focus-ring rounded-full border border-line px-3 py-2 text-xs text-titanium hover:text-ink" onClick={onResetBudget} type="button">
-                {zh ? "取消編輯" : "Cancel edit"}
+                {tx(locale, "Cancel edit")}
               </button>
             )}
           </div>
 
           <form className="space-y-4" onSubmit={onSaveBudget}>
-            <Field label={zh ? "月份" : "Month"}>
+            <Field label={tx(locale, "Month")}>
               <input className="input-control focus-ring w-full px-3 text-ink" type="month" value={budgetForm.month} onChange={(event) => onUpdateBudgetForm("month", event.target.value)} required />
             </Field>
 
-            <Field label={zh ? "分類" : "Category"}>
+            <Field label={tx(locale, "Category")}>
               <select className="input-control focus-ring w-full px-3 text-ink" value={budgetForm.category} onChange={(event) => onUpdateBudgetForm("category", event.target.value)}>
                 {cashflowCategories.expense.map((category) => (
                   <option key={category.id} value={category.id}>{zh ? category.zh : category.en}</option>
@@ -3217,10 +3276,10 @@ function CashflowView({
             </Field>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label={zh ? "預算金額" : "Budget amount"}>
+              <Field label={tx(locale, "Budget amount")}>
                 <NumericInput value={budgetForm.amount} onChange={(value) => onUpdateBudgetForm("amount", value)} />
               </Field>
-              <Field label={zh ? "幣別" : "Currency"}>
+              <Field label={tx(locale, "Currency")}>
                 <select className="input-control focus-ring w-full px-3 text-ink" value={budgetForm.currency} onChange={(event) => onUpdateBudgetForm("currency", event.target.value as Currency)}>
                   <option value="USD">USD</option>
                   <option value="TWD">TWD</option>
@@ -3228,10 +3287,10 @@ function CashflowView({
               </Field>
             </div>
 
-            <Field label={zh ? "備註" : "Notes"}>
+            <Field label={tx(locale, "Notes")}>
               <textarea
                 className="input-control focus-ring min-h-24 w-full resize-none px-3 py-3 text-ink"
-                placeholder={zh ? "可選填" : "Optional"}
+                placeholder={tx(locale, "Optional")}
                 value={budgetForm.notes}
                 onChange={(event) => onUpdateBudgetForm("notes", event.target.value)}
               />
@@ -3239,27 +3298,27 @@ function CashflowView({
 
             <button className="primary-button focus-ring flex min-h-12 w-full items-center justify-center gap-2 rounded-full px-4 font-medium" type="submit">
               <Plus size={17} />
-              {budgetEditingId ? (zh ? "更新預算" : "Update budget") : (zh ? "儲存預算" : "Save budget")}
+              {budgetEditingId ? (tx(locale, "Update budget")) : (tx(locale, "Save budget"))}
             </button>
           </form>
         </section>
 
         <section className="space-y-5">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <MetricCard label={zh ? "本月預算" : "Monthly budget"} value={formatBudgetLimitTotal(budgetRows)} icon={<ReceiptText size={20} />} />
-            <MetricCard label={zh ? "已花費" : "Spent"} value={formatBudgetSpentTotal(budgetRows)} trend={budgetRows.length ? -1 : undefined} icon={<Activity size={20} />} />
-            <MetricCard label={zh ? "超支分類" : "Over budget"} value={String(overBudgetRows.length)} trend={overBudgetRows.length ? -1 : undefined} icon={<ListChecks size={20} />} />
+            <MetricCard label={tx(locale, "Monthly budget")} value={formatBudgetLimitTotal(budgetRows)} icon={<ReceiptText size={20} />} />
+            <MetricCard label={tx(locale, "Spent")} value={formatBudgetSpentTotal(budgetRows)} trend={budgetRows.length ? -1 : undefined} icon={<Activity size={20} />} />
+            <MetricCard label={tx(locale, "Over budget")} value={String(overBudgetRows.length)} trend={overBudgetRows.length ? -1 : undefined} icon={<ListChecks size={20} />} />
           </div>
 
           <section className="glass-panel apple-card p-5">
             <div className="mb-5">
-              <h3 className="text-xl font-semibold text-ink">{zh ? "分類預算" : "Category budgets"}</h3>
-              <p className="mt-1 text-sm text-titanium">{zh ? "目前顯示本月預算；點擊項目可編輯。" : "Showing this month's budgets. Click an item to edit."}</p>
+              <h3 className="text-xl font-semibold text-ink">{tx(locale, "Category budgets")}</h3>
+              <p className="mt-1 text-sm text-titanium">{tx(locale, "Showing this month's budgets. Click an item to edit.")}</p>
             </div>
 
             {!budgetRows.length ? (
               <div className="subtle-panel apple-card-sm p-8 text-center text-titanium">
-                {zh ? "新增第一筆預算後，這裡會顯示已花、剩餘與超支狀態。" : "Add your first budget to see spending, remaining amount, and over-budget status."}
+                {tx(locale, "Add your first budget to see spending, remaining amount, and over-budget status.")}
               </div>
             ) : (
               <div className="grid gap-3">
@@ -3272,7 +3331,7 @@ function CashflowView({
                       </button>
                       <div className="text-right">
                         <p className={clsx("font-semibold", row.remaining < 0 ? "text-rose" : "text-ink")}>{formatCurrency(row.remaining, row.budget.currency)}</p>
-                        <p className="mt-1 text-xs text-titanium">{zh ? "剩餘" : "Remaining"}</p>
+                        <p className="mt-1 text-xs text-titanium">{tx(locale, "Remaining")}</p>
                       </div>
                     </div>
                     <div className="mb-3 h-2 rounded-full bg-white/10">
@@ -3282,9 +3341,9 @@ function CashflowView({
                       />
                     </div>
                     <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-titanium">
-                      <span>{zh ? "已花" : "Spent"} {formatCurrency(row.spent, row.budget.currency)} / {formatCurrency(row.budget.amount, row.budget.currency)}</span>
+                      <span>{tx(locale, "Spent")} {formatCurrency(row.spent, row.budget.currency)} / {formatCurrency(row.budget.amount, row.budget.currency)}</span>
                       <div className="flex items-center gap-2">
-                        {row.remaining < 0 && <span className="rounded-full bg-rose/10 px-2.5 py-1 text-rose">{zh ? "超支" : "Over budget"}</span>}
+                        {row.remaining < 0 && <span className="rounded-full bg-rose/10 px-2.5 py-1 text-rose">{tx(locale, "Over budget")}</span>}
                         <button
                           aria-label={zh ? `刪除 ${getCategoryLabel(row.budget.category, locale)} 預算` : `Delete ${getCategoryLabel(row.budget.category, locale)} budget`}
                           className="focus-ring rounded-xl border border-line p-2 text-titanium transition hover:bg-rose/10 hover:text-rose"
@@ -3313,17 +3372,17 @@ function CashflowView({
           {transactionHistoryFilter !== "today" && (
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <button className="focus-ring rounded-full border border-line px-3 py-2 text-sm text-titanium hover:text-ink" onClick={() => changeSelectedHistoryMonth(-1)} type="button">
-                {zh ? "上月" : "Prev month"}
+                {tx(locale, "Prev month")}
               </button>
               <p className="font-semibold text-ink">{selectedMonthLabel}</p>
               <button className="focus-ring rounded-full border border-line px-3 py-2 text-sm text-titanium hover:text-ink" onClick={() => changeSelectedHistoryMonth(1)} type="button">
-                {zh ? "下月" : "Next month"}
+                {tx(locale, "Next month")}
               </button>
             </div>
           )}
           {!filteredSelectedMonthTransactions.length ? (
             <div className="subtle-panel apple-card-sm p-8 text-center text-titanium">
-              {zh ? "目前沒有符合條件的紀錄。" : "There are no matching records."}
+              {tx(locale, "There are no matching records.")}
             </div>
           ) : (
             <div className="grid gap-3">
@@ -3358,13 +3417,13 @@ function CashflowView({
 
       {expandedList === "recurring" && (
         <ExpandedListModal
-          title={zh ? "固定支出與訂閱完整清單" : "All Recurring Expenses and Subscriptions"}
+          title={tx(locale, "All Recurring Expenses and Subscriptions")}
           subtitle={zh ? `共 ${recurringExpenses.length} 筆，未啟用項目不計入摘要。` : `${recurringExpenses.length} items. Inactive items are excluded from summaries.`}
           onClose={() => setExpandedList(null)}
         >
           {!recurringExpenses.length ? (
             <div className="subtle-panel apple-card-sm p-8 text-center text-titanium">
-              {zh ? "尚未新增固定支出。" : "No recurring expenses yet."}
+              {tx(locale, "No recurring expenses yet.")}
             </div>
           ) : (
             <div className="grid gap-3">
@@ -3376,7 +3435,7 @@ function CashflowView({
                       <span className="min-w-0">
                         <span className="block truncate font-semibold text-ink">{expense.name}</span>
                         <span className="mt-1 block text-xs text-titanium">
-                          {getRecurringCategoryLabel(expense.category, locale)} · {expense.frequency === "monthly" ? (zh ? "每月" : "Monthly") : (zh ? "每年" : "Yearly")} · {zh ? "下次" : "Next"} {formatDateOnly(expense.next_due_date, locale)}
+                          {getRecurringCategoryLabel(expense.category, locale)} · {expense.frequency === "monthly" ? (tx(locale, "Monthly")) : (tx(locale, "Yearly"))} · {tx(locale, "Next")} {formatDateOnly(expense.next_due_date, locale)}
                         </span>
                         {expense.is_subscription && (
                           <span className="mt-2 inline-flex rounded-full bg-white/10 px-2.5 py-1 text-xs text-titanium">
@@ -3387,7 +3446,7 @@ function CashflowView({
                     </button>
                     <div className="text-right">
                       <p className="font-semibold text-ink">{formatCurrency(expense.amount, expense.currency)}</p>
-                      {expense.is_subscription && <p className="mt-1 text-xs text-titanium">{zh ? "年化" : "Annual"}: {formatRecurringAnnualizedAmount(expense)}</p>}
+                      {expense.is_subscription && <p className="mt-1 text-xs text-titanium">{tx(locale, "Annual")}: {formatRecurringAnnualizedAmount(expense)}</p>}
                     </div>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -3410,13 +3469,13 @@ function CashflowView({
 
       {expandedList === "debts" && (
         <ExpandedListModal
-          title={zh ? "貸款與債務完整清單" : "All Loans and Debts"}
+          title={tx(locale, "All Loans and Debts")}
           subtitle={zh ? `共 ${debts.length} 筆，未啟用項目不計入摘要。` : `${debts.length} items. Inactive debts are excluded from summaries.`}
           onClose={() => setExpandedList(null)}
         >
           {!debts.length ? (
             <div className="subtle-panel apple-card-sm p-8 text-center text-titanium">
-              {zh ? "尚未新增貸款或債務。" : "No loans or debts yet."}
+              {tx(locale, "No loans or debts yet.")}
             </div>
           ) : (
             <div className="grid gap-3">
@@ -3425,15 +3484,15 @@ function CashflowView({
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <button className="text-left" onClick={() => onEditDebt(debt)} type="button">
                       <span className="block font-semibold text-ink">{debt.name}</span>
-                      <span className="mt-1 block text-xs text-titanium">{getDebtTypeLabel(debt.debt_type, locale)} · {debt.lender || (zh ? "未設定機構" : "No lender")}</span>
+                      <span className="mt-1 block text-xs text-titanium">{getDebtTypeLabel(debt.debt_type, locale)} · {debt.lender || (tx(locale, "No lender"))}</span>
                     </button>
                     <div className="text-right">
                       <p className="font-semibold text-ink">{formatCurrency(debt.remaining_principal, debt.currency)}</p>
-                      <p className="mt-1 text-xs text-titanium">{zh ? "利率" : "APR"}: {debt.interest_rate.toFixed(2)}%</p>
+                      <p className="mt-1 text-xs text-titanium">{tx(locale, "APR")}: {debt.interest_rate.toFixed(2)}%</p>
                     </div>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-xs text-titanium">{zh ? "下次付款" : "Next payment"}: {formatDateOnly(debt.next_payment_date, locale)} · {formatCurrency(debt.minimum_payment, debt.currency)}</p>
+                    <p className="text-xs text-titanium">{tx(locale, "Next payment")}: {formatDateOnly(debt.next_payment_date, locale)} · {formatCurrency(debt.minimum_payment, debt.currency)}</p>
                     <button
                       aria-label={zh ? `刪除 ${debt.name}` : `Delete ${debt.name}`}
                       className="focus-ring rounded-xl border border-line p-2 text-titanium transition hover:bg-rose/10 hover:text-rose"
@@ -3485,27 +3544,41 @@ function HoldingsView({
   onHoldingsChanged: () => Promise<void>;
 }) {
   const [mode, setMode] = useState<"manual" | "wallet">("manual");
+  const [manualTab, setManualTab] = useState<"form" | "import">("form");
   const editingWalletHolding = editingWalletCost
     ? enriched.find((holding) => holding.id === editingId) ?? null
     : null;
 
+  useEffect(() => {
+    if (editingId) setManualTab("form");
+  }, [editingId]);
+
   return (
     <div className="space-y-6">
       <div className="pill-panel inline-flex p-1">
-        <button className={clsx("focus-ring rounded-full px-4 py-2 text-sm", mode === "manual" ? "primary-button" : "text-titanium")} onClick={() => setMode("manual")} type="button">{locale === "zh" ? "手動新增" : "Manual"}</button>
-        <button className={clsx("focus-ring rounded-full px-4 py-2 text-sm", mode === "wallet" ? "primary-button" : "text-titanium")} onClick={() => setMode("wallet")} type="button">{locale === "zh" ? "地址追蹤" : "Address tracking"}</button>
+        <button className={clsx("focus-ring rounded-full px-4 py-2 text-sm", mode === "manual" ? "primary-button" : "text-titanium")} onClick={() => setMode("manual")} type="button">{tx(locale, "Manual")}</button>
+        <button className={clsx("focus-ring rounded-full px-4 py-2 text-sm", mode === "wallet" ? "primary-button" : "text-titanium")} onClick={() => setMode("wallet")} type="button">{tx(locale, "Address tracking")}</button>
       </div>
       {mode === "wallet" ? (
         <WalletTracker demo={demo} locale={locale} userId={userId} onHoldingsChanged={onHoldingsChanged} />
       ) : (
         <div className="space-y-5">
           <section className="glass-panel apple-card p-5">
-            <div className="mb-5 flex items-center gap-2">
-              <Plus size={20} className="text-mint" />
-              <h3 className="text-xl font-semibold text-ink">
-                {editingWalletCost ? (locale === "zh" ? "編輯成本" : "Edit cost") : editingId ? t.editHolding : t.addHolding}
-              </h3>
-            </div>
+            {editingId ? (
+              <div className="mb-5 flex items-center gap-2">
+                <Plus size={20} className="text-mint" />
+                <h3 className="text-xl font-semibold text-ink">
+                  {editingWalletCost ? (tx(locale, "Edit cost")) : t.editHolding}
+                </h3>
+              </div>
+            ) : (
+              <div className="pill-panel mb-5 inline-flex p-1">
+                <button className={clsx("focus-ring rounded-full px-4 py-2 text-sm", manualTab === "form" ? "primary-button" : "text-titanium")} onClick={() => setManualTab("form")} type="button">{tx(locale, "Add holding")}</button>
+                <button className={clsx("focus-ring rounded-full px-4 py-2 text-sm", manualTab === "import" ? "primary-button" : "text-titanium")} onClick={() => setManualTab("import")} type="button">{tx(locale, "Import Excel")}</button>
+              </div>
+            )}
+            {editingId || manualTab === "form" ? (
+            <>
             {editingWalletHolding && (
               <div className="subtle-panel apple-card-sm mb-5 flex flex-wrap items-center justify-between gap-3 p-4">
                 <div>
@@ -3599,7 +3672,7 @@ function HoldingsView({
                   }}
                 />
               </Field>
-              <label className="input-control flex items-center gap-3 px-3 text-sm text-ink">
+              <label className="input-control flex h-12 items-center gap-3 self-end px-3 text-sm text-ink">
                 <input className="h-4 w-4" checked={form.cost_known !== false} onChange={(event) => onUpdateForm("cost_known", event.target.checked)} type="checkbox" />
                 {t.costKnown}
               </label>
@@ -3624,15 +3697,23 @@ function HoldingsView({
                 )}
               </div>
             </form>
+            </>
+            ) : (
+              <HoldingsImport
+                demo={demo}
+                embedded
+                existingHoldings={enriched}
+                locale={locale}
+                userId={userId}
+                onHoldingsChanged={onHoldingsChanged}
+              />
+            )}
           </section>
 
           <section className="glass-panel apple-card p-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 className="text-xl font-semibold text-ink">{t.holdings}</h3>
-                <p className="mt-1 text-sm text-titanium">
-                  {locale === "zh" ? "手動持倉與錢包來源分開顯示。" : "Manual holdings and wallet sources are shown separately."}
-                </p>
               </div>
             </div>
             <HoldingsTable
@@ -3704,9 +3785,9 @@ function HoldingQuantitySummary({
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-titanium">
           <ListChecks aria-hidden="true" size={22} />
         </div>
-        <h3 className="mt-4 text-xl font-semibold text-ink">{zh ? "尚無持有數量" : "No quantities yet"}</h3>
+        <h3 className="mt-4 text-xl font-semibold text-ink">{tx(locale, "No quantities yet")}</h3>
         <p className="mt-2 text-sm text-titanium">
-          {zh ? "新增持倉或同步錢包後，資產數量會顯示在這裡。" : "Add a holding or sync a wallet to see asset quantities here."}
+          {tx(locale, "Add a holding or sync a wallet to see asset quantities here.")}
         </p>
       </section>
     );
@@ -3723,21 +3804,16 @@ function HoldingQuantitySummary({
           <div>
             <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-titanium">
               <ListChecks aria-hidden="true" className="text-[var(--accent)]" size={14} />
-              {zh ? "資產庫存視圖" : "Position inventory"}
+              {tx(locale, "Position inventory")}
             </div>
             <h3 className="mt-4 text-3xl font-semibold tracking-[-0.045em] text-ink">
-              {zh ? "持有數量" : "Quantities"}
+              {tx(locale, "Quantities")}
             </h3>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-titanium">
-              {zh
-                ? "同代號會先合併，再依資產類型顯示張數、股數或代幣數量。不同資產不會相加成沒有意義的總數。"
-                : "Same symbols are aggregated first, then shown as lots, shares, or token balances. Unlike units are never combined into a misleading total."}
-            </p>
           </div>
           <div className="subtle-panel apple-card-sm min-w-[150px] p-4 text-right">
-            <p className="text-xs font-medium text-titanium">{zh ? "合併後資產" : "Aggregated assets"}</p>
+            <p className="text-xs font-medium text-titanium">{tx(locale, "Aggregated assets")}</p>
             <p className="mt-1 text-3xl font-semibold tracking-[-0.05em] text-ink">{summary.length}</p>
-            <p className="mt-1 text-xs text-titanium">{zh ? "種代號" : "symbols"}</p>
+            <p className="mt-1 text-xs text-titanium">{tx(locale, "symbols")}</p>
           </div>
         </div>
 
@@ -3775,7 +3851,7 @@ function HoldingQuantitySummary({
               </div>
             </div>
             <span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-titanium">
-              {zh ? "同代號已合併" : "Symbols aggregated"}
+              {tx(locale, "Symbols aggregated")}
             </span>
           </div>
 
@@ -3808,7 +3884,7 @@ function HoldingQuantitySummary({
                 <div className="my-5 h-px bg-line" />
 
                 <p className="text-xs font-medium uppercase tracking-[0.12em] text-titanium">
-                  {zh ? "目前持有" : "Current quantity"}
+                  {tx(locale, "Current quantity")}
                 </p>
                 <p className="mt-2 break-words text-2xl font-semibold tracking-[-0.04em] text-ink">
                   {formatHoldingQuantity(item.quantity, item.assetType, locale)}
@@ -3816,7 +3892,7 @@ function HoldingQuantitySummary({
 
                 {item.assetType === "tw_stock" && (
                   <div className="mt-4 flex items-center justify-between rounded-xl bg-white/10 px-3 py-2">
-                    <span className="text-xs text-titanium">{zh ? "約當股數" : "Share equivalent"}</span>
+                    <span className="text-xs text-titanium">{tx(locale, "Share equivalent")}</span>
                     <span className="text-xs font-semibold text-ink">{formatTaiwanShares(item.quantity, locale)}</span>
                   </div>
                 )}
@@ -3861,17 +3937,17 @@ function CryptoSearch({ value, locale, onChange, onSelect }: { value: string; lo
 
   return (
     <div className="relative">
-      <input className="input-control focus-ring w-full px-3 text-ink" placeholder={locale === "zh" ? "搜尋幣種名稱或代號" : "Search coin name or symbol"} value={value} onFocus={() => setOpen(true)} onChange={(event) => { onChange(event.target.value); setOpen(true); }} required />
+      <input className="input-control focus-ring w-full px-3 text-ink" placeholder={tx(locale, "Search coin name or symbol")} value={value} onFocus={() => setOpen(true)} onChange={(event) => { onChange(event.target.value); setOpen(true); }} required />
       {open && value.length >= 2 && (
         <div className="glass-panel apple-card-sm absolute z-20 mt-2 max-h-72 w-full overflow-y-auto p-1">
-          {loading && <p className="px-3 py-3 text-sm text-titanium">{locale === "zh" ? "搜尋中..." : "Searching..."}</p>}
+          {loading && <p className="px-3 py-3 text-sm text-titanium">{tx(locale, "Searching...")}</p>}
           {!loading && results.map((coin) => (
             <button key={coin.id} className="focus-ring flex w-full items-center justify-between rounded-xl px-3 py-2 text-left hover:bg-white/10" onMouseDown={(event) => event.preventDefault()} onClick={() => { onSelect(coin); setOpen(false); }} type="button">
               <span><span className="font-medium text-ink">{coin.name}</span><span className="ml-2 text-xs text-titanium">{coin.symbol}</span></span>
               <span className="text-xs text-titanium">{coin.marketCapRank ? `#${coin.marketCapRank}` : ""}</span>
             </button>
           ))}
-          {!loading && !results.length && <p className="px-3 py-3 text-sm text-titanium">{locale === "zh" ? "找不到幣種" : "No coins found"}</p>}
+          {!loading && !results.length && <p className="px-3 py-3 text-sm text-titanium">{tx(locale, "No coins found")}</p>}
         </div>
       )}
     </div>
@@ -3912,11 +3988,11 @@ function SymbolSearch({
         });
         const data = (await response.json()) as { results?: SymbolSearchResult[]; error?: string };
         setResults(data.results ?? []);
-        if (!response.ok) setSearchError(data.error ?? (locale === "zh" ? "代號搜尋暫時無法使用" : "Symbol search is unavailable"));
+        if (!response.ok) setSearchError(data.error ?? (tx(locale, "Symbol search is unavailable")));
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
           setResults([]);
-          setSearchError(locale === "zh" ? "代號搜尋暫時無法使用" : "Symbol search is unavailable");
+          setSearchError(tx(locale, "Symbol search is unavailable"));
         }
       } finally {
         setLoading(false);
@@ -3945,7 +4021,7 @@ function SymbolSearch({
       />
       {open && value.trim() && (
         <div className="glass-panel apple-card-sm absolute z-20 mt-2 max-h-72 w-full overflow-y-auto p-1">
-          {loading && <p className="px-3 py-3 text-sm text-titanium">{locale === "zh" ? "搜尋中..." : "Searching..."}</p>}
+          {loading && <p className="px-3 py-3 text-sm text-titanium">{tx(locale, "Searching...")}</p>}
           {!loading && searchError && <p className="px-3 py-3 text-sm text-rose">{searchError}</p>}
           {!loading && !searchError && results.map((result) => (
             <button
@@ -3966,7 +4042,7 @@ function SymbolSearch({
             </button>
           ))}
           {!loading && !searchError && !results.length && (
-            <p className="px-3 py-3 text-sm text-titanium">{locale === "zh" ? "找不到符合的代號" : "No matching symbols"}</p>
+            <p className="px-3 py-3 text-sm text-titanium">{tx(locale, "No matching symbols")}</p>
           )}
         </div>
       )}
@@ -4027,18 +4103,18 @@ function AnalysisView({
   const concentrationHigh = (largestHolding?.allocationPercent ?? 0) > 30;
   const scenarios = [
     {
-      name: zh ? "全面避險" : "Broad risk-off",
-      detail: zh ? "股票 -10%，加密貨幣 -20%" : "Stocks -10%, crypto -20%",
+      name: tx(locale, "Broad risk-off"),
+      detail: tx(locale, "Stocks -10%, crypto -20%"),
       shocks: { cash: 0, crypto: -0.2, tw_stock: -0.1, us_stock: -0.1 } satisfies Record<AssetType, number>,
     },
     {
-      name: zh ? "股票修正" : "Equity correction",
-      detail: zh ? "美股與台股同步下跌 15%" : "US and Taiwan stocks fall 15%",
+      name: tx(locale, "Equity correction"),
+      detail: tx(locale, "US and Taiwan stocks fall 15%"),
       shocks: { cash: 0, crypto: 0, tw_stock: -0.15, us_stock: -0.15 } satisfies Record<AssetType, number>,
     },
     {
-      name: zh ? "加密貨幣回撤" : "Crypto drawdown",
-      detail: zh ? "加密貨幣資產下跌 30%" : "Crypto assets fall 30%",
+      name: tx(locale, "Crypto drawdown"),
+      detail: tx(locale, "Crypto assets fall 30%"),
       shocks: { cash: 0, crypto: -0.3, tw_stock: 0, us_stock: 0 } satisfies Record<AssetType, number>,
     },
   ].map((scenario) => {
@@ -4056,33 +4132,33 @@ function AnalysisView({
   const riskFlags = [
     {
       detail: concentrationHigh
-        ? (zh ? "單一資產超過 30%，個別事件會明顯影響整體績效。" : "One asset exceeds 30%, increasing single-name risk.")
-        : (zh ? "目前沒有單一資產超過 30%。" : "No single asset exceeds 30%."),
-      title: zh ? "單一資產集中度" : "Single-asset concentration",
+        ? (tx(locale, "One asset exceeds 30%, increasing single-name risk."))
+        : (tx(locale, "No single asset exceeds 30%.")),
+      title: tx(locale, "Single-asset concentration"),
       value: largestHolding ? `${largestHolding.symbol} ${largestHolding.allocationPercent.toFixed(1)}%` : "N/A",
       warning: concentrationHigh,
     },
     {
       detail: topThreeWeight > 65
-        ? (zh ? "前三大資產合計超過 65%，分散效果有限。" : "The top three exceed 65%, limiting diversification.")
-        : (zh ? "前三大資產集中度仍在可控範圍。" : "Top-three concentration remains moderate."),
-      title: zh ? "前三大集中度" : "Top-three concentration",
+        ? (tx(locale, "The top three exceed 65%, limiting diversification."))
+        : (tx(locale, "Top-three concentration remains moderate.")),
+      title: tx(locale, "Top-three concentration"),
       value: `${topThreeWeight.toFixed(1)}%`,
       warning: topThreeWeight > 65,
     },
     {
       detail: cryptoWeight > 35
-        ? (zh ? "加密貨幣比重較高，投資組合波動可能放大。" : "High crypto exposure may amplify portfolio volatility.")
-        : (zh ? "加密貨幣比重未超過 35%。" : "Crypto exposure is below 35%."),
-      title: zh ? "加密貨幣曝險" : "Crypto exposure",
+        ? (tx(locale, "High crypto exposure may amplify portfolio volatility."))
+        : (tx(locale, "Crypto exposure is below 35%.")),
+      title: tx(locale, "Crypto exposure"),
       value: `${cryptoWeight.toFixed(1)}%`,
       warning: cryptoWeight > 35,
     },
     {
       detail: priceCoverage < 95
-        ? (zh ? "部分持倉缺少價格，市值與配置分析可能不完整。" : "Missing prices may make valuation and allocation incomplete.")
-        : (zh ? "大部分資產已有可用市場價格。" : "Market prices cover most portfolio value."),
-      title: zh ? "價格覆蓋率" : "Price coverage",
+        ? (tx(locale, "Missing prices may make valuation and allocation incomplete."))
+        : (tx(locale, "Market prices cover most portfolio value.")),
+      title: tx(locale, "Price coverage"),
       value: `${priceCoverage.toFixed(1)}%`,
       warning: priceCoverage < 95,
     },
@@ -4093,9 +4169,9 @@ function AnalysisView({
       <section className="glass-panel apple-card overflow-hidden p-5 sm:p-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-sm font-medium text-[var(--accent)]">{zh ? "投資組合診斷" : "Portfolio diagnostics"}</p>
+            <p className="text-sm font-medium text-[var(--accent)]">{tx(locale, "Portfolio diagnostics")}</p>
             <h3 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-ink sm:text-3xl">
-              {zh ? "風險與品質快照" : "Risk and quality snapshot"}
+              {tx(locale, "Risk and quality snapshot")}
             </h3>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-titanium">
               {zh
@@ -4110,25 +4186,25 @@ function AnalysisView({
         <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <AnalysisMetric
             detail={largestHolding?.symbol ?? "N/A"}
-            label={zh ? "最大單一持倉" : "Largest position"}
+            label={tx(locale, "Largest position")}
             tone={concentrationHigh ? "warning" : "positive"}
             value={`${(largestHolding?.allocationPercent ?? 0).toFixed(1)}%`}
           />
           <AnalysisMetric
-            detail={zh ? "反映實際分散程度" : "Adjusted for position weights"}
-            label={zh ? "有效持倉數" : "Effective holdings"}
+            detail={tx(locale, "Adjusted for position weights")}
+            label={tx(locale, "Effective holdings")}
             tone={effectiveHoldings >= 5 ? "positive" : "warning"}
             value={effectiveHoldings.toFixed(1)}
           />
           <AnalysisMetric
-            detail={zh ? "可計算損益的市值" : "Value with usable cost basis"}
-            label={zh ? "成本覆蓋率" : "Cost coverage"}
+            detail={tx(locale, "Value with usable cost basis")}
+            label={tx(locale, "Cost coverage")}
             tone={costCoverage >= 90 ? "positive" : "warning"}
             value={`${costCoverage.toFixed(1)}%`}
           />
           <AnalysisMetric
             detail={zh ? `現金配置 ${cashWeight.toFixed(1)}%` : `Cash allocation ${cashWeight.toFixed(1)}%`}
-            label={zh ? "前三大集中度" : "Top-three weight"}
+            label={tx(locale, "Top-three weight")}
             tone={topThreeWeight > 65 ? "warning" : "positive"}
             value={`${topThreeWeight.toFixed(1)}%`}
           />
@@ -4186,9 +4262,9 @@ function AnalysisView({
 
       <section className="glass-panel apple-card p-5 sm:p-6">
         <div>
-          <h3 className="text-xl font-semibold text-ink">{zh ? "風險監測" : "Risk monitor"}</h3>
+          <h3 className="text-xl font-semibold text-ink">{tx(locale, "Risk monitor")}</h3>
           <p className="mt-1 text-sm text-titanium">
-            {zh ? "以明確門檻標示目前需要注意的配置問題。" : "Threshold-based checks for portfolio allocation and data quality."}
+            {tx(locale, "Threshold-based checks for portfolio allocation and data quality.")}
           </p>
         </div>
         <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -4209,28 +4285,28 @@ function AnalysisView({
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
         <ContributionPanel
-          emptyLabel={zh ? "需要已知成本才能分析損益來源。" : "Known costs are required for gain contribution analysis."}
+          emptyLabel={tx(locale, "Known costs are required for gain contribution analysis.")}
           holdings={gainContributors}
           locale={locale}
           maxAbs={maxGainContribution}
           mode="gain"
-          subtitle={zh ? "顯示哪些資產正在拉高或拖累累積未實現損益。" : "Assets contributing most to cumulative unrealized gain or loss."}
-          title={zh ? "損益貢獻來源" : "Gain/loss contribution"}
+          subtitle={tx(locale, "Assets contributing most to cumulative unrealized gain or loss.")}
+          title={tx(locale, "Gain/loss contribution")}
         />
         <ContributionPanel
-          emptyLabel={zh ? "目前沒有足夠的單日價格資料。" : "Not enough daily price data is available."}
+          emptyLabel={tx(locale, "Not enough daily price data is available.")}
           holdings={dayContributors}
           locale={locale}
           maxAbs={maxDayContribution}
           mode="day"
-          subtitle={zh ? "依美元影響排序，不只看漲跌百分比。" : "Ranked by dollar impact, not percentage movement alone."}
-          title={zh ? "今日風險貢獻" : "Daily risk contribution"}
+          subtitle={tx(locale, "Ranked by dollar impact, not percentage movement alone.")}
+          title={tx(locale, "Daily risk contribution")}
         />
       </div>
 
       <section className="glass-panel apple-card p-5 sm:p-6">
         <div>
-          <h3 className="text-xl font-semibold text-ink">{zh ? "壓力情境試算" : "Stress scenarios"}</h3>
+          <h3 className="text-xl font-semibold text-ink">{tx(locale, "Stress scenarios")}</h3>
           <p className="mt-1 text-sm leading-6 text-titanium">
             {zh
               ? "將固定跌幅套用到目前市值，估算一次性衝擊；這不是預測，也未納入資產相關性。"
@@ -4247,7 +4323,7 @@ function AnalysisView({
               </p>
               <p className="mt-1 text-sm font-medium text-rose">{formatPercent(scenario.impactPercent)}</p>
               <div className="mt-4 border-t border-line pt-3 text-xs text-titanium">
-                {zh ? "情境後估計市值" : "Estimated value after shock"}{" "}
+                {tx(locale, "Estimated value after shock")}{" "}
                 <span className="font-semibold text-ink">{formatCurrency(scenario.remainingValue)}</span>
               </div>
             </div>
@@ -4342,7 +4418,7 @@ function ContributionPanel({
         <div className="subtle-panel apple-card-sm mt-5 p-5 text-sm text-titanium">{emptyLabel}</div>
       )}
       <p className="mt-4 text-[11px] text-titanium">
-        {locale === "zh" ? "同幣種跨地址持倉已先合併計算。" : "Same-asset positions across sources are aggregated first."}
+        {tx(locale, "Same-asset positions across sources are aggregated first.")}
       </p>
     </section>
   );
@@ -4367,28 +4443,24 @@ function SettingsView({
           <h3 className="text-xl font-semibold text-ink">外觀</h3>
         </div>
         <p className="mb-4 text-sm leading-6 text-titanium">選擇淺色、深色，或跟隨裝置系統設定。</p>
-        <ThemeToggle />
+        <ThemeToggle locale={locale} />
       </section>
       <section className="glass-panel apple-card p-5">
         <div className="mb-5 flex items-center gap-2">
           <Languages size={20} style={{ color: "var(--accent)" }} />
           <h3 className="text-xl font-semibold text-ink">{t.language}</h3>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            className={clsx("focus-ring rounded-2xl border border-line px-4 py-4", locale === "zh" ? "primary-button" : "interactive-muted text-ink")}
-            onClick={() => onLocaleChange("zh")}
-            type="button"
-          >
-            中文
-          </button>
-          <button
-            className={clsx("focus-ring rounded-2xl border border-line px-4 py-4", locale === "en" ? "primary-button" : "interactive-muted text-ink")}
-            onClick={() => onLocaleChange("en")}
-            type="button"
-          >
-            English
-          </button>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {localeOrder.map((item) => (
+            <button
+              className={clsx("focus-ring rounded-2xl border border-line px-4 py-4", locale === item ? "primary-button" : "interactive-muted text-ink")}
+              key={item}
+              onClick={() => onLocaleChange(item)}
+              type="button"
+            >
+              {localeNames[item]}
+            </button>
+          ))}
         </div>
       </section>
       <section className="glass-panel apple-card p-5">
@@ -4448,7 +4520,6 @@ function HoldingsTable({
             <th className="w-[130px] px-4 py-3 text-right">{t.value}</th>
             <th className="w-[145px] px-4 py-3 text-right">{t.gainLoss}</th>
             {!compact && <th className="w-[100px] px-4 py-3 text-right">{t.allocation}</th>}
-            {!compact && <th className="w-[160px] px-4 py-3 text-right">{t.source}</th>}
             <th className="w-[110px] px-4 py-3 text-right"></th>
           </tr>
         </thead>
@@ -4502,21 +4573,11 @@ function HoldingsTable({
                 {holding.cost_known === false ? <UnknownCostLabel label="N/A" /> : <><span className="block">{formatCurrency(holding.gainUsd)}</span><span className="text-xs">{formatPercent(holding.gainPercent)}</span></>}
               </td>
               {!compact && <td className="whitespace-nowrap px-4 py-4 text-right text-ink">{holding.allocationPercent.toFixed(1)}%</td>}
-              {!compact && <td className="px-4 py-4 text-right text-titanium"><span className="block">{holding.source_kind === "wallet" ? holding.source_label : t.manual}</span><span className="text-xs">{holding.quote?.source ?? (holding.cost_known === false ? t.priceUnavailable : "Cost basis")}</span></td>}
               <td className="px-4 py-4 text-right">
-                {!compact && holding.source_kind === "wallet" && (
-                  <button
-                    className="focus-ring rounded-full border border-line px-3 py-2 text-xs font-medium text-titanium transition hover:bg-white/10 hover:text-ink"
-                    onClick={() => onEdit(holding)}
-                    type="button"
-                  >
-                    {t.averageCost}
-                  </button>
-                )}
-                {!compact && holding.source_kind !== "wallet" && (
+                {!compact && (
                   <button
                     aria-label={`${t.delete} ${holding.symbol}`}
-                    className="focus-ring rounded-xl border border-line p-2 text-titanium transition hover:bg-rose/10 hover:text-rose"
+                    className="focus-ring ml-auto flex rounded-xl border border-line p-2 text-titanium transition hover:bg-rose/10 hover:text-rose"
                     onClick={() => onDelete(holding.id)}
                     type="button"
                   >
@@ -4527,7 +4588,7 @@ function HoldingsTable({
             </tr>
             {hasSources && isExpanded && (
               <tr className="border-t border-line bg-white/5">
-                <td colSpan={compact ? 6 : 9} className="px-4 py-4">
+                <td colSpan={compact ? 6 : 8} className="px-4 py-4">
                   <SourceBreakdown sources={sources} t={t} />
                 </td>
               </tr>
@@ -4909,7 +4970,6 @@ function getCashflowCalendarEvents(
   debts: Debt[],
   locale: Locale,
 ): CashflowCalendarEvent[] {
-  const zh = locale === "zh";
   const visibleMonthKeys = new Set(getRecentMonthKeys(12).concat(getFutureMonthKeys(12)));
   const events: CashflowCalendarEvent[] = [];
 
@@ -4936,7 +4996,7 @@ function getCashflowCalendarEvents(
             amount: formatCurrency(expense.amount, expense.currency),
             date: `${monthKey}-${String(day).padStart(2, "0")}`,
             kind: "recurring",
-            label: expense.is_subscription ? (zh ? "訂閱" : "Subscription") : getRecurringCategoryLabel(expense.category, locale),
+            label: expense.is_subscription ? (tx(locale, "Subscription")) : getRecurringCategoryLabel(expense.category, locale),
             title: expense.name,
           });
         });
@@ -4947,7 +5007,7 @@ function getCashflowCalendarEvents(
         amount: formatCurrency(expense.amount, expense.currency),
         date: expense.next_due_date,
         kind: "recurring",
-        label: expense.is_subscription ? (zh ? "訂閱" : "Subscription") : getRecurringCategoryLabel(expense.category, locale),
+        label: expense.is_subscription ? (tx(locale, "Subscription")) : getRecurringCategoryLabel(expense.category, locale),
         title: expense.name,
       });
     });

@@ -1,6 +1,6 @@
 export type AssetType = "crypto" | "us_stock" | "tw_stock" | "cash";
 export type Currency = "USD" | "TWD";
-export type Locale = "en" | "zh";
+export type Locale = "en" | "zh" | "ja" | "ko" | "es";
 export type CashflowType = "income" | "expense";
 export type RecurringFrequency = "monthly" | "yearly";
 export type SubscriptionUsageStatus = "active" | "rarely_used" | "consider_canceling";

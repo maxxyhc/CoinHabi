@@ -1,35 +1,42 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Laptop, Moon, Sun } from "lucide-react";
+import { Moon, Sun } from "lucide-react";
 import clsx from "clsx";
+import { tx } from "@/lib/i18n";
+import type { Locale } from "@/lib/types";
 
-type ThemeMode = "light" | "dark" | "system";
+type ThemeMode = "light" | "dark";
 
 const options = [
-  { value: "light" as const, label: "淺色", icon: Sun },
-  { value: "dark" as const, label: "深色", icon: Moon },
-  { value: "system" as const, label: "系統", icon: Laptop },
+  { value: "light" as const, labelKey: "Light", icon: Sun },
+  { value: "dark" as const, labelKey: "Dark", icon: Moon },
 ];
 
 function applyTheme(mode: ThemeMode) {
-  const dark = mode === "dark" || (mode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  const dark = mode === "dark";
   document.documentElement.dataset.theme = dark ? "dark" : "light";
   document.documentElement.style.colorScheme = dark ? "dark" : "light";
 }
 
-export function ThemeToggle({ compact = false }: { compact?: boolean }) {
-  const [mode, setMode] = useState<ThemeMode>("system");
+export function ThemeToggle({ compact = false, locale = "zh" }: { compact?: boolean; locale?: Locale }) {
+  const [mode, setMode] = useState<ThemeMode>("light");
 
   useEffect(() => {
-    const saved = window.localStorage.getItem("theme") as ThemeMode | null;
-    const initial = saved && ["light", "dark", "system"].includes(saved) ? saved : "system";
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const saved = window.localStorage.getItem("theme");
+    const initial: ThemeMode = saved === "light" || saved === "dark" ? saved : media.matches ? "dark" : "light";
     setMode(initial);
     applyTheme(initial);
 
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    // Until the user explicitly picks a theme, follow the system preference.
     const handleChange = () => {
-      if ((window.localStorage.getItem("theme") ?? "system") === "system") applyTheme("system");
+      const stored = window.localStorage.getItem("theme");
+      if (stored !== "light" && stored !== "dark") {
+        const next: ThemeMode = media.matches ? "dark" : "light";
+        setMode(next);
+        applyTheme(next);
+      }
     };
     media.addEventListener("change", handleChange);
     return () => media.removeEventListener("change", handleChange);
@@ -42,8 +49,10 @@ export function ThemeToggle({ compact = false }: { compact?: boolean }) {
   }
 
   return (
-    <div className="theme-switcher" aria-label="Color theme">
-      {options.map(({ value, label, icon: Icon }) => (
+    <div className="theme-switcher" aria-label={tx(locale, "Theme")}>
+      {options.map(({ value, labelKey, icon: Icon }) => {
+        const label = tx(locale, labelKey);
+        return (
         <button
           key={value}
           aria-label={label}
@@ -56,7 +65,8 @@ export function ThemeToggle({ compact = false }: { compact?: boolean }) {
           <Icon size={16} />
           {!compact && <span>{label}</span>}
         </button>
-      ))}
+        );
+      })}
     </div>
   );
 }
