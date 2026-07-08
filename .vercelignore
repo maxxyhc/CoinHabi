@@ -1,0 +1,14 @@
+.git
+.codex
+.agents
+.pnpm-store
+.next
+node_modules
+open-design
+
+.env
+.env.*
+!.env.example
+
+*.log
+.DS_Store
