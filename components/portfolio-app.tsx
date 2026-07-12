@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   BarChart3,
@@ -64,14 +64,17 @@ import { MobilePortfolioApp } from "@/components/mobile-portfolio-app";
 import {
   aggregateHoldingsForOverview,
   buildFinancialHealthNotes,
+  convertAmount,
   currencyAmountToUsd,
   currencyBucketTotal,
   currencyBucketsToUsd,
+  currencySymbols,
   emptyCurrencyBuckets,
   enrichHoldings,
   formatCurrency,
   formatHealthRatio,
   formatPercent,
+  formatUsdIn,
   getFinancialHealthScore,
   getMonthlyCashflowOverview,
   getPortfolioTotals,
@@ -79,12 +82,36 @@ import {
   isSameMonth,
   parseDateOnly,
   type CurrencyBuckets,
+  type CurrencyFxInput,
   type MonthlyCashflowOverview,
 } from "@/lib/calculations";
 import { getDictionary, isLocale, localeNames, localeOrder, tx } from "@/lib/i18n";
+import { supportedCurrencies } from "@/lib/types";
 import type { AssetType, CashflowTransaction, CashflowTransactionInput, CashflowType, CryptoSearchResult, Currency, Debt, DebtInput, DebtType, EnrichedHolding, Holding, HoldingInput, Locale, MarketResponse, MonthlyBudget, MonthlyBudgetInput, RecurringExpense, RecurringExpenseInput, SymbolSearchResult } from "@/lib/types";
 
 type Tab = "dashboard" | "holdings" | "quantities" | "cashflow" | "financialHealth" | "charts" | "analysis" | "settings";
+
+type MoneyFmt = {
+  displayCurrency: Currency;
+  fx: CurrencyFxInput;
+  fmtUsd: (valueUsd: number) => string;
+  fmtAmount: (value: number, from: Currency) => string;
+  fmtAmountFull: (value: number, from: Currency) => string;
+};
+
+const defaultMoney: MoneyFmt = {
+  displayCurrency: "USD",
+  fx: 1 / 32,
+  fmtUsd: (valueUsd) => formatCurrency(valueUsd),
+  fmtAmount: (value, from) => formatCurrency(value, from),
+  fmtAmountFull: (value, from) => formatCurrency(value, from),
+};
+
+const MoneyContext = createContext<MoneyFmt>(defaultMoney);
+
+function useMoney() {
+  return useContext(MoneyContext);
+}
 
 const emptyForm: HoldingInput = {
   asset_type: "us_stock",
@@ -139,11 +166,13 @@ const emptyDebtForm: DebtInput = {
 
 const emptyBudgetForm: MonthlyBudgetInput = {
   month: new Date().toISOString().slice(0, 7),
-  category: "food",
+  category: "total",
   amount: "0",
   currency: "USD",
   notes: "",
 };
+
+const totalBudgetCategory = "total";
 
 const cashflowCategories: Record<CashflowType, Array<{ id: string; en: string; zh: string }>> = {
   income: [
@@ -287,14 +316,12 @@ function createDemoData() {
   ];
 
   const budgets: MonthlyBudget[] = [
-    { id: "demo-b-1", user_id: "demo-user", month: `${currentYear}-${currentMonth}-01`, category: "food", amount: 650, currency: "USD", notes: null, created_at: isoNow, updated_at: isoNow },
-    { id: "demo-b-2", user_id: "demo-user", month: `${currentYear}-${currentMonth}-01`, category: "transport", amount: 300, currency: "USD", notes: null, created_at: isoNow, updated_at: isoNow },
-    { id: "demo-b-3", user_id: "demo-user", month: `${currentYear}-${currentMonth}-01`, category: "shopping", amount: 450, currency: "USD", notes: null, created_at: isoNow, updated_at: isoNow },
+    { id: "demo-b-1", user_id: "demo-user", month: `${currentYear}-${currentMonth}-01`, category: totalBudgetCategory, amount: 1400, currency: "USD", notes: null, created_at: isoNow, updated_at: isoNow },
   ];
 
   const market: MarketResponse = {
     refreshedAt: isoNow,
-    fx: { usdToTwd: 32.2, twdToUsd: 1 / 32.2 },
+    fx: { usdToTwd: 32.2, twdToUsd: 1 / 32.2, usdToEur: 0.92, eurToUsd: 1 / 0.92, usdToJpy: 157, jpyToUsd: 1 / 157, usdToKrw: 1380, krwToUsd: 1 / 1380 },
     quotes: {
       "demo-h-1": { symbol: "AAPL", price: 196.5, currency: "USD", priceUsd: 196.5, dayChangePercent: 0.8, source: "Demo" },
       "demo-h-2": { symbol: "2330.TW", price: 960, currency: "TWD", priceUsd: 960 / 32.2, dayChangePercent: -0.4, source: "Demo" },
@@ -335,7 +362,52 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
   const [editingDebtId, setEditingDebtId] = useState<string | null>(null);
   const [editingBudgetId, setEditingBudgetId] = useState<string | null>(null);
   const [portfolioName, setPortfolioName] = useState("");
+  const [displayCurrency, setDisplayCurrency] = useState<Currency>("USD");
   const priceRequestId = useRef(0);
+
+  const applyDefaultFormCurrency = useCallback((nextCurrency: Currency) => {
+    if (!editingCashflowId) setCashflowForm((current) => ({ ...current, currency: nextCurrency }));
+    if (!editingRecurringId) setRecurringForm((current) => ({ ...current, currency: nextCurrency }));
+    if (!editingDebtId) setDebtForm((current) => ({ ...current, currency: nextCurrency }));
+    if (!editingBudgetId) setBudgetForm((current) => ({ ...current, currency: nextCurrency }));
+  }, [editingBudgetId, editingCashflowId, editingDebtId, editingRecurringId]);
+
+  async function changeDisplayCurrency(nextCurrency: Currency) {
+    setDisplayCurrency(nextCurrency);
+    applyDefaultFormCurrency(nextCurrency);
+
+    if (demo) {
+      window.localStorage.setItem("displayCurrency", nextCurrency);
+      return;
+    }
+
+    if (!supabase || !userId) return;
+    const { error: settingsError } = await supabase
+      .from("user_settings")
+      .upsert({ display_currency: nextCurrency, user_id: userId }, { onConflict: "user_id" });
+    if (settingsError) {
+      setError(settingsError.message.includes("display_currency")
+        ? "Please run supabase/migrations/0012_display_currency.sql in Supabase SQL Editor."
+        : settingsError.message);
+    }
+  }
+
+  const money = useMemo<MoneyFmt>(() => {
+    const fx: CurrencyFxInput = market?.fx ?? 1 / 32;
+    const fmtUsd = (valueUsd: number) => formatUsdIn(valueUsd, displayCurrency, fx);
+    const fmtAmount = (value: number, from: Currency) =>
+      formatCurrency(convertAmount(value, from, displayCurrency, fx), displayCurrency);
+    return {
+      displayCurrency,
+      fx,
+      fmtUsd,
+      fmtAmount,
+      fmtAmountFull: (value: number, from: Currency) =>
+        from === displayCurrency
+          ? formatCurrency(value, from)
+          : `${fmtAmount(value, from)} (${formatCurrency(value, from)})`,
+    };
+  }, [displayCurrency, market]);
 
   async function changePortfolioName(nextName: string) {
     const trimmed = nextName.trim().slice(0, 12);
@@ -385,6 +457,10 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
     if (storedPortfolioName) {
       setPortfolioName(storedPortfolioName);
     }
+    const storedDisplayCurrency = window.localStorage.getItem("displayCurrency");
+    if (storedDisplayCurrency && (supportedCurrencies as readonly string[]).includes(storedDisplayCurrency)) {
+      setDisplayCurrency(storedDisplayCurrency as Currency);
+    }
     setHoldings(demoData.holdings);
     setCashflowTransactions(demoData.transactions);
     setRecurringExpenses(demoData.recurringExpenses);
@@ -416,7 +492,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
 
     const { data: settingsData, error: settingsError } = await supabase
       .from("user_settings")
-      .select("portfolio_name")
+      .select("*")
       .maybeSingle();
 
     if (settingsError) {
@@ -425,6 +501,10 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
       }
     } else {
       setPortfolioName(settingsData?.portfolio_name ?? "");
+      const storedCurrency = settingsData?.display_currency;
+      if (storedCurrency && (supportedCurrencies as readonly string[]).includes(storedCurrency)) {
+        setDisplayCurrency(storedCurrency as Currency);
+      }
     }
 
     const { data, error: holdingsError } = await supabase
@@ -686,6 +766,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
     setEditingCashflowId(null);
     setCashflowForm({
       ...emptyCashflowForm,
+      currency: displayCurrency,
       transaction_date: new Date().toISOString().slice(0, 10),
     });
   }
@@ -694,6 +775,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
     setEditingRecurringId(null);
     setRecurringForm({
       ...emptyRecurringForm,
+      currency: displayCurrency,
       next_due_date: new Date().toISOString().slice(0, 10),
     });
   }
@@ -702,6 +784,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
     setEditingDebtId(null);
     setDebtForm({
       ...emptyDebtForm,
+      currency: displayCurrency,
       next_payment_date: new Date().toISOString().slice(0, 10),
     });
   }
@@ -710,6 +793,8 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
     setEditingBudgetId(null);
     setBudgetForm({
       ...emptyBudgetForm,
+      category: totalBudgetCategory,
+      currency: displayCurrency,
       month: new Date().toISOString().slice(0, 7),
     });
   }
@@ -978,7 +1063,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
     const { error: saveError } = await query;
     if (saveError) {
       setError(saveError.message.includes("monthly_budgets")
-        ? "Please run supabase/migrations/0009_monthly_budgets.sql in Supabase SQL Editor."
+        ? "Please run supabase/migrations/0011_multi_currency_total_budget.sql in Supabase SQL Editor."
         : saveError.message);
       return;
     }
@@ -1000,6 +1085,29 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
       setError(deleteError.message);
       return;
     }
+    await loadHoldings();
+  }
+
+  async function clearAllHoldings() {
+    if (demo) {
+      setError(tx(locale, "Demo mode is read-only. Nothing was deleted."));
+      return;
+    }
+    if (!supabase || !userId || !holdings.length) {
+      return;
+    }
+    const confirmed = window.confirm(
+      tx(locale, "Delete all {count} holdings? This cannot be undone. Wallet-tracked assets will reappear after the next wallet sync.", {
+        count: holdings.length,
+      }),
+    );
+    if (!confirmed) return;
+    const { error: deleteError } = await supabase.from("holdings").delete().eq("user_id", userId);
+    if (deleteError) {
+      setError(deleteError.message);
+      return;
+    }
+    resetForm();
     await loadHoldings();
   }
 
@@ -1118,10 +1226,12 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
         refreshedAt={market?.refreshedAt}
         refreshing={refreshing}
         transactions={cashflowTransactions}
-        twdToUsd={market?.fx.twdToUsd ?? 1 / 32}
+        displayCurrency={displayCurrency}
+        fx={market?.fx ?? 1 / 32}
         userEmail={userEmail}
         userId={userId}
         onDeleteHolding={deleteHolding}
+        onDisplayCurrencyChange={changeDisplayCurrency}
         onHoldingsChanged={loadHoldings}
         onLocaleChange={changeLocale}
         onPortfolioNameChange={changePortfolioName}
@@ -1144,6 +1254,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
   }
 
   return (
+    <MoneyContext.Provider value={money}>
     <main className="min-h-screen px-3 py-3 sm:px-6 sm:py-6">
       <div className="mx-auto grid max-w-[1520px] grid-cols-1 gap-5 lg:grid-cols-[236px_1fr]">
         <aside className="glass-panel app-sidebar p-3.5 lg:sticky lg:top-6 lg:h-[calc(100dvh-3rem)] lg:overflow-hidden">
@@ -1197,11 +1308,13 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
         <section className="min-w-0 space-y-5">
           <Header
             activeTab={activeTab}
+            displayCurrency={displayCurrency}
             locale={locale}
             refreshedAt={market?.refreshedAt}
             refreshing={refreshing}
             t={t}
             onRefresh={() => refreshPrices()}
+            onDisplayCurrencyChange={changeDisplayCurrency}
             onLocaleChange={changeLocale}
           />
 
@@ -1225,6 +1338,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
               locale={locale}
               t={t}
               userId={userId}
+              onClearAll={clearAllHoldings}
               onDelete={deleteHolding}
               onEdit={startEdit}
               onReset={resetForm}
@@ -1285,7 +1399,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
               recurringExpenses={recurringExpenses}
               totals={totals}
               transactions={cashflowTransactions}
-              twdToUsd={market?.fx.twdToUsd ?? 1 / 32}
+              twdToUsd={market?.fx ?? 1 / 32}
             />
           )}
 
@@ -1297,7 +1411,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
               recurringExpenses={recurringExpenses}
               totals={totals}
               transactions={cashflowTransactions}
-              twdToUsd={market?.fx.twdToUsd ?? 1 / 32}
+              twdToUsd={market?.fx ?? 1 / 32}
             />
           )}
 
@@ -1312,29 +1426,34 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
           )}
 
           {activeTab === "settings" && (
-            <SettingsView locale={locale} market={market} t={t} onLocaleChange={changeLocale} />
+            <SettingsView displayCurrency={displayCurrency} locale={locale} market={market} t={t} onDisplayCurrencyChange={changeDisplayCurrency} onLocaleChange={changeLocale} />
           )}
         </section>
       </div>
     </main>
+    </MoneyContext.Provider>
   );
 }
 
 function Header({
   activeTab,
+  displayCurrency,
   locale,
   refreshedAt,
   refreshing,
   t,
   onRefresh,
+  onDisplayCurrencyChange,
   onLocaleChange,
 }: {
   activeTab: Tab;
+  displayCurrency: Currency;
   locale: Locale;
   refreshedAt?: string;
   refreshing: boolean;
   t: ReturnType<typeof getDictionary>;
   onRefresh: () => void;
+  onDisplayCurrencyChange: (currency: Currency) => void;
   onLocaleChange: (locale: Locale) => void;
 }) {
   const title = t[activeTab];
@@ -1359,6 +1478,21 @@ function Header({
             onChange={(event) => onLocaleChange(event.target.value as Locale)}
           >
             {localeOrder.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}
+          </select>
+        </label>
+        <label className="pill-panel focus-within:ring-2 focus-within:ring-[var(--accent)]/35 relative hidden h-11 min-w-[112px] cursor-pointer items-center justify-center gap-2 rounded-full px-4 min-[520px]:flex">
+          <CircleDollarSign aria-hidden="true" className="shrink-0 text-[var(--accent)]" size={18} />
+          <span className="text-sm font-semibold text-ink">{currencySymbols[displayCurrency]} {displayCurrency}</span>
+          <select
+            aria-label={t.baseCurrency}
+            title={t.baseCurrency}
+            className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
+            value={displayCurrency}
+            onChange={(event) => onDisplayCurrencyChange(event.target.value as Currency)}
+          >
+            {supportedCurrencies.map((currency) => (
+              <option key={currency} value={currency}>{currencySymbols[currency]} {currency}</option>
+            ))}
           </select>
         </label>
         <button
@@ -1390,6 +1524,7 @@ function DashboardView({
   t: ReturnType<typeof getDictionary>;
   onEdit: (holding: Holding) => void;
 }) {
+  const money = useMoney();
   const overviewHoldings = useMemo(() => aggregateHoldingsForOverview(enriched), [enriched]);
   const sourceMap = useMemo(() => buildSourceMap(enriched), [enriched]);
   const [chartKey, setChartKey] = useState("");
@@ -1420,9 +1555,9 @@ function DashboardView({
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard primary label={t.totalValue} value={formatCurrency(totals.totalValue)} icon={<CircleDollarSign size={20} />} />
-        <MetricCard label={t.totalGain} value={formatCurrency(totals.totalGain)} trend={totals.totalGain} icon={<Activity size={20} />} />
-        <MetricCard label={t.dayChange} value={formatCurrency(totals.dayChange)} detail={formatPercent(totals.dayChangePercent)} trend={totals.dayChange} icon={<RefreshCw size={20} />} />
+        <MetricCard primary label={t.totalValue} value={money.fmtUsd(totals.totalValue)} icon={<CircleDollarSign size={20} />} />
+        <MetricCard label={t.totalGain} value={money.fmtUsd(totals.totalGain)} trend={totals.totalGain} icon={<Activity size={20} />} />
+        <MetricCard label={t.dayChange} value={money.fmtUsd(totals.dayChange)} detail={formatPercent(totals.dayChangePercent)} trend={totals.dayChange} icon={<RefreshCw size={20} />} />
         <MetricCard label={t.returnRate} value={formatPercent(totals.totalReturn)} trend={totals.totalReturn} icon={<BarChart3 size={20} />} />
       </div>
 
@@ -1495,6 +1630,7 @@ function DayMoversPanel({
   locale: Locale;
   totals: ReturnType<typeof getPortfolioTotals>;
 }) {
+  const money = useMoney();
   const movers = [...holdings]
     .filter((holding) => holding.asset_type !== "cash" && holding.quote && Math.abs(holding.dayChangeUsd) > 0.005)
     .sort((a, b) => b.dayChangeUsd - a.dayChangeUsd)
@@ -1532,7 +1668,7 @@ function DayMoversPanel({
                   </div>
                   <span className={clsx("text-right tabular-nums", positive ? "text-mint" : "text-rose")}>
                     {positive ? "+" : ""}
-                    {formatCurrency(holding.dayChangeUsd)}
+                    {money.fmtUsd(holding.dayChangeUsd)}
                   </span>
                 </div>
               );
@@ -1542,7 +1678,7 @@ function DayMoversPanel({
             <span className="text-sm text-titanium">{tx(locale, "Total today")}</span>
             <span className={clsx("font-semibold tabular-nums", totalPositive ? "text-mint" : "text-rose")}>
               {totalPositive ? "+" : ""}
-              {formatCurrency(totals.dayChange)} · {formatPercent(totals.dayChangePercent)}
+              {money.fmtUsd(totals.dayChange)} · {formatPercent(totals.dayChangePercent)}
             </span>
           </div>
         </>
@@ -1582,7 +1718,7 @@ function ChartsView({
   recurringExpenses: RecurringExpense[];
   totals: ReturnType<typeof getPortfolioTotals>;
   transactions: CashflowTransaction[];
-  twdToUsd: number;
+  twdToUsd: CurrencyFxInput;
 }) {
   const zh = locale === "zh";
   const monthlyCashflow = useMemo(() => getMonthlyCashflowChartData(transactions, twdToUsd, locale), [locale, transactions, twdToUsd]);
@@ -1734,8 +1870,9 @@ function FinancialHealthView({
   recurringExpenses: RecurringExpense[];
   totals: ReturnType<typeof getPortfolioTotals>;
   transactions: CashflowTransaction[];
-  twdToUsd: number;
+  twdToUsd: CurrencyFxInput;
 }) {
+  const money = useMoney();
   const zh = locale === "zh";
   const monthTransactions = transactions.filter((transaction) => isSameMonth(transaction.transaction_date));
   const activeRecurringExpenses = recurringExpenses.filter((expense) => expense.is_active);
@@ -1836,11 +1973,11 @@ function FinancialHealthView({
       </section>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
-        <MetricCard label={tx(locale, "Net worth")} value={formatCurrency(netWorthUsd)} trend={netWorthUsd} detail={tx(locale, "Portfolio value minus debt")} icon={<CircleDollarSign size={20} />} />
+        <MetricCard label={tx(locale, "Net worth")} value={money.fmtUsd(netWorthUsd)} trend={netWorthUsd} detail={tx(locale, "Portfolio value minus debt")} icon={<CircleDollarSign size={20} />} />
         <MetricCard label={tx(locale, "Savings rate")} value={formatHealthRatio(savingsRate)} trend={savingsRate ?? undefined} detail={tx(locale, "Leftover divided by income")} icon={<BarChart3 size={20} />} />
         <MetricCard label={tx(locale, "Fixed pressure")} value={formatHealthRatio(fixedPressure)} trend={fixedPressure === null ? undefined : -fixedPressure} detail={tx(locale, "Recurring plus debt minimums")} icon={<RefreshCw size={20} />} />
         <MetricCard label={tx(locale, "Debt-to-income")} value={formatHealthRatio(debtIncomeRatio)} trend={debtIncomeRatio === null ? undefined : -debtIncomeRatio} detail={tx(locale, "Debt minimums divided by income")} icon={<Activity size={20} />} />
-        <MetricCard label={tx(locale, "Total debt")} value={formatCurrency(debtPrincipalUsd)} trend={debtPrincipalUsd ? -debtPrincipalUsd : undefined} detail={activeDebts.length ? (zh ? `${activeDebts.length} 筆啟用債務` : `${activeDebts.length} active debts`) : (tx(locale, "No active debts"))} icon={<ReceiptText size={20} />} />
+        <MetricCard label={tx(locale, "Total debt")} value={money.fmtUsd(debtPrincipalUsd)} trend={debtPrincipalUsd ? -debtPrincipalUsd : undefined} detail={activeDebts.length ? (zh ? `${activeDebts.length} 筆啟用債務` : `${activeDebts.length} active debts`) : (tx(locale, "No active debts"))} icon={<ReceiptText size={20} />} />
         <MetricCard label={tx(locale, "Data quality")} value={dataIssues ? `${dataIssues}` : (tx(locale, "Good"))} trend={dataIssues ? -dataIssues : 1} detail={tx(locale, "Unknown cost or missing price count")} icon={<ShieldCheck size={20} />} />
       </div>
 
@@ -1860,10 +1997,10 @@ function FinancialHealthView({
         <section className="glass-panel apple-card p-5 sm:p-6">
           <h3 className="text-xl font-semibold text-ink">{tx(locale, "Current inputs")}</h3>
           <div className="mt-4 divide-y divide-line overflow-hidden rounded-3xl border border-line bg-panel/70">
-            <HealthRow label={tx(locale, "Portfolio value")} value={formatCurrency(totals.totalValue)} />
-            <HealthRow label={tx(locale, "Outstanding debt")} value={formatCurrency(debtPrincipalUsd)} />
-            <HealthRow label={tx(locale, "Monthly income")} value={formatCurrency(incomeUsd)} />
-            <HealthRow label={tx(locale, "Estimated leftover")} value={formatCurrency(leftoverUsd)} />
+            <HealthRow label={tx(locale, "Portfolio value")} value={money.fmtUsd(totals.totalValue)} />
+            <HealthRow label={tx(locale, "Outstanding debt")} value={money.fmtUsd(debtPrincipalUsd)} />
+            <HealthRow label={tx(locale, "Monthly income")} value={money.fmtUsd(incomeUsd)} />
+            <HealthRow label={tx(locale, "Estimated leftover")} value={money.fmtUsd(leftoverUsd)} />
             <HealthRow label={tx(locale, "Over-budget categories")} value={`${overBudgetRows.length}`} />
             <HealthRow label={tx(locale, "Subscriptions to review")} value={`${subscriptionsToReview.length}`} />
           </div>
@@ -2410,6 +2547,7 @@ function CashflowView({
   onUpdateForm: <K extends keyof CashflowTransactionInput>(key: K, value: CashflowTransactionInput[K]) => void;
   onUpdateRecurringForm: <K extends keyof RecurringExpenseInput>(key: K, value: RecurringExpenseInput[K]) => void;
 }) {
+  const money = useMoney();
   const zh = locale === "zh";
   const [cashflowMode, setCashflowMode] = useState<"transactions" | "recurring" | "debts" | "budgets">("transactions");
   const [overviewMode, setOverviewMode] = useState<"monthly" | "yearly">("monthly");
@@ -2430,6 +2568,9 @@ function CashflowView({
   const currentMonthKey = new Date().toISOString().slice(0, 7);
   const currentBudgets = budgets.filter((budget) => budget.month.slice(0, 7) === currentMonthKey);
   const budgetRows = getBudgetRows(currentBudgets, monthTransactions, locale);
+  const totalBudgetRows = budgetRows.filter((row) => row.budget.category === totalBudgetCategory);
+  const categoryBudgetRows = budgetRows.filter((row) => row.budget.category !== totalBudgetCategory);
+  const summaryBudgetRows = totalBudgetRows.length ? totalBudgetRows : categoryBudgetRows;
   const overBudgetRows = budgetRows.filter((row) => row.remaining < 0);
   const activeRecurringExpenses = recurringExpenses.filter((expense) => expense.is_active);
   const activeSubscriptions = activeRecurringExpenses.filter((expense) => expense.is_subscription);
@@ -2442,13 +2583,13 @@ function CashflowView({
     .sort((a, b) => parseDateOnly(a.next_due_date).getTime() - parseDateOnly(b.next_due_date).getTime())
     .slice(0, 5);
   const todayExpenses = transactions.filter((transaction) => transaction.transaction_type === "expense" && isToday(transaction.transaction_date));
-  const todayTotal = formatCashflowTotals(todayExpenses, "expense");
-  const netTotal = formatNetCashflow(monthTransactions);
-  const recurringMonthlyTotal = formatRecurringMonthlyTotal(activeRecurringExpenses);
-  const subscriptionAnnualTotal = formatRecurringAnnualTotal(activeSubscriptions);
+  const todayTotal = formatCashflowTotals(todayExpenses, "expense", money);
+  const netTotal = formatNetCashflow(monthTransactions, money);
+  const recurringMonthlyTotal = formatRecurringMonthlyTotal(activeRecurringExpenses, money);
+  const subscriptionAnnualTotal = formatRecurringAnnualTotal(activeSubscriptions, money);
   const activeDebts = debts.filter((debt) => debt.is_active);
-  const totalDebtPrincipal = formatDebtPrincipalTotal(activeDebts);
-  const totalDebtMonthlyPayment = formatDebtMonthlyPaymentTotal(activeDebts);
+  const totalDebtPrincipal = formatDebtPrincipalTotal(activeDebts, money);
+  const totalDebtMonthlyPayment = formatDebtMonthlyPaymentTotal(activeDebts, money);
   const highestInterestDebt = [...activeDebts].sort((a, b) => b.interest_rate - a.interest_rate)[0] ?? null;
   const upcomingDebtPayments = [...activeDebts]
     .sort((a, b) => parseDateOnly(a.next_payment_date).getTime() - parseDateOnly(b.next_payment_date).getTime())
@@ -2460,8 +2601,8 @@ function CashflowView({
     ? new Date().toLocaleDateString(locale === "zh" ? "zh-TW" : "en-US", { month: "long", year: "numeric" })
     : String(new Date().getFullYear());
   const calendarEvents = useMemo(
-    () => getCashflowCalendarEvents(transactions, activeRecurringExpenses, activeDebts, locale),
-    [activeDebts, activeRecurringExpenses, locale, transactions],
+    () => getCashflowCalendarEvents(transactions, activeRecurringExpenses, activeDebts, locale, money),
+    [activeDebts, activeRecurringExpenses, locale, money, transactions],
   );
   const categoryOptions = cashflowCategories[form.transaction_type];
   const transactionHistoryTitle = transactionHistoryFilter === "income"
@@ -2516,7 +2657,7 @@ function CashflowView({
             label={overviewMode === "monthly" ? (tx(locale, "Monthly income")) : (tx(locale, "Yearly income"))}
             onClick={overviewMode === "monthly" ? () => openTransactionHistory("income") : undefined}
             trend={1}
-            value={formatCurrencyBuckets(overview.income)}
+            value={formatCurrencyBuckets(money, overview.income)}
           />
           <MetricCard
             actionLabel={overviewMode === "monthly" ? (tx(locale, "View monthly expense details")) : undefined}
@@ -2524,7 +2665,7 @@ function CashflowView({
             label={overviewMode === "monthly" ? (tx(locale, "Monthly expenses")) : (tx(locale, "Yearly expenses"))}
             onClick={overviewMode === "monthly" ? () => openTransactionHistory("expense") : undefined}
             trend={-1}
-            value={formatCurrencyBuckets(overview.expenses)}
+            value={formatCurrencyBuckets(money, overview.expenses)}
           />
           <MetricCard
             actionLabel={tx(locale, "View recurring expense details")}
@@ -2532,7 +2673,7 @@ function CashflowView({
             label={overviewMode === "monthly" ? (tx(locale, "Recurring")) : (tx(locale, "Annualized recurring"))}
             onClick={() => setExpandedList("recurring")}
             trend={hasCurrencyValue(overview.recurring) ? -1 : undefined}
-            value={formatCurrencyBuckets(overview.recurring)}
+            value={formatCurrencyBuckets(money, overview.recurring)}
           />
           <MetricCard
             actionLabel={tx(locale, "View loan and debt details")}
@@ -2540,9 +2681,9 @@ function CashflowView({
             label={overviewMode === "monthly" ? (tx(locale, "Debt minimums")) : (tx(locale, "Annualized debt minimums"))}
             onClick={() => setExpandedList("debts")}
             trend={hasCurrencyValue(overview.debtPayments) ? -1 : undefined}
-            value={formatCurrencyBuckets(overview.debtPayments)}
+            value={formatCurrencyBuckets(money, overview.debtPayments)}
           />
-          <MetricCard label={tx(locale, "Estimated leftover")} value={formatCurrencyBuckets(overview.leftover)} trend={currencyBucketTotal(overview.leftover)} icon={<CircleDollarSign size={20} />} />
+          <MetricCard label={tx(locale, "Estimated leftover")} value={formatCurrencyBuckets(money, overview.leftover)} trend={currencyBucketTotal(overview.leftover)} icon={<CircleDollarSign size={20} />} />
           <MetricCard label={tx(locale, "Fixed pressure")} value={formatPressureRatio(overview)} trend={-overview.pressureRatio} icon={<BarChart3 size={20} />} />
         </div>
       </section>
@@ -2614,8 +2755,9 @@ function CashflowView({
             </Field>
             <Field label={tx(locale, "Currency")}>
               <select className="input-control focus-ring w-full px-3 text-ink" value={form.currency} onChange={(event) => onUpdateForm("currency", event.target.value as Currency)}>
-                <option value="USD">USD</option>
-                <option value="TWD">TWD</option>
+                {supportedCurrencies.map((currency) => (
+                  <option key={currency} value={currency}>{currency}</option>
+                ))}
               </select>
             </Field>
           </div>
@@ -2779,7 +2921,7 @@ function CashflowView({
                       <td className="px-4 py-4 text-titanium">{getCategoryLabel(transaction.category, locale)}</td>
                       <td className="px-4 py-4 text-titanium">{getPaymentMethodLabel(transaction.payment_method, locale)}</td>
                       <td className={clsx("whitespace-nowrap px-4 py-4 text-right font-semibold", transaction.transaction_type === "income" ? "text-mint" : "text-rose")}>
-                        {transaction.transaction_type === "income" ? "+" : "-"}{formatCurrency(transaction.amount, transaction.currency)}
+                        {transaction.transaction_type === "income" ? "+" : "-"}{money.fmtAmountFull(transaction.amount, transaction.currency)}
                       </td>
                       <td className="px-4 py-4 text-right">
                         <button
@@ -2848,8 +2990,9 @@ function CashflowView({
               </Field>
               <Field label={tx(locale, "Currency")}>
                 <select className="input-control focus-ring w-full px-3 text-ink" value={recurringForm.currency} onChange={(event) => onUpdateRecurringForm("currency", event.target.value as Currency)}>
-                  <option value="USD">USD</option>
-                  <option value="TWD">TWD</option>
+                  {supportedCurrencies.map((currency) => (
+                    <option key={currency} value={currency}>{currency}</option>
+                  ))}
                 </select>
               </Field>
             </div>
@@ -2988,8 +3131,8 @@ function CashflowView({
                         </span>
                       </button>
                       <div className="text-right">
-                        <p className="font-semibold text-ink">{formatCurrency(expense.amount, expense.currency)}</p>
-                        {expense.is_subscription && <p className="mt-1 text-xs text-titanium">{tx(locale, "Annual")}: {formatRecurringAnnualizedAmount(expense)}</p>}
+                        <p className="font-semibold text-ink">{money.fmtAmountFull(expense.amount, expense.currency)}</p>
+                        {expense.is_subscription && <p className="mt-1 text-xs text-titanium">{tx(locale, "Annual")}: {formatRecurringAnnualizedAmount(expense, money)}</p>}
                         <p className="mt-1 text-xs text-titanium">{tx(locale, "Next")}: {formatDateOnly(expense.next_due_date, locale)}</p>
                       </div>
                     </div>
@@ -3024,7 +3167,7 @@ function CashflowView({
                   <div className="flex items-center justify-between gap-4 rounded-2xl border border-amber/20 bg-amber/5 p-3 text-sm" key={expense.id}>
                     <div>
                       <p className="font-medium text-ink">{expense.name}</p>
-                      <p className="text-xs text-titanium">{getSubscriptionUsageLabel(expense.usage_status ?? "active", locale)} · {formatRecurringAnnualizedAmount(expense)} / {tx(locale, "year")}</p>
+                      <p className="text-xs text-titanium">{getSubscriptionUsageLabel(expense.usage_status ?? "active", locale)} · {formatRecurringAnnualizedAmount(expense, money)} / {tx(locale, "year")}</p>
                     </div>
                     <button className="focus-ring rounded-full border border-line px-3 py-2 text-xs text-titanium hover:text-ink" onClick={() => onEditRecurring(expense)} type="button">
                       {tx(locale, "Review")}
@@ -3045,7 +3188,7 @@ function CashflowView({
                       <p className="font-medium text-ink">{expense.name}</p>
                       <p className="text-xs text-titanium">{tx(locale, "In")} {Math.max(0, daysUntil(expense.next_due_date))} {tx(locale, "days")}</p>
                     </div>
-                    <p className="font-semibold text-ink">{formatCurrency(expense.amount, expense.currency)}</p>
+                    <p className="font-semibold text-ink">{money.fmtAmountFull(expense.amount, expense.currency)}</p>
                   </div>
                 ))}
               </div>
@@ -3062,7 +3205,7 @@ function CashflowView({
                       <p className="font-medium text-ink">{expense.name}</p>
                       <p className="text-xs text-titanium">{formatDateOnly(expense.next_due_date, locale)}</p>
                     </div>
-                    <p className="font-semibold text-ink">{formatCurrency(expense.amount, expense.currency)}</p>
+                    <p className="font-semibold text-ink">{money.fmtAmountFull(expense.amount, expense.currency)}</p>
                   </div>
                 ))}
               </div>
@@ -3118,8 +3261,9 @@ function CashflowView({
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label={tx(locale, "Currency")}>
                 <select className="input-control focus-ring w-full px-3 text-ink" value={debtForm.currency} onChange={(event) => onUpdateDebtForm("currency", event.target.value as Currency)}>
-                  <option value="USD">USD</option>
-                  <option value="TWD">TWD</option>
+                  {supportedCurrencies.map((currency) => (
+                    <option key={currency} value={currency}>{currency}</option>
+                  ))}
                 </select>
               </Field>
               <Field label={tx(locale, "APR %")}>
@@ -3203,12 +3347,12 @@ function CashflowView({
                         <span className="mt-1 block text-xs text-titanium">{getDebtTypeLabel(debt.debt_type, locale)} · {debt.lender || (tx(locale, "No lender"))}</span>
                       </button>
                       <div className="text-right">
-                        <p className="font-semibold text-ink">{formatCurrency(debt.remaining_principal, debt.currency)}</p>
+                        <p className="font-semibold text-ink">{money.fmtAmountFull(debt.remaining_principal, debt.currency)}</p>
                         <p className="mt-1 text-xs text-titanium">{tx(locale, "APR")}: {debt.interest_rate.toFixed(2)}%</p>
                       </div>
                     </div>
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                      <p className="text-xs text-titanium">{tx(locale, "Next payment")}: {formatDateOnly(debt.next_payment_date, locale)} · {formatCurrency(debt.minimum_payment, debt.currency)}</p>
+                      <p className="text-xs text-titanium">{tx(locale, "Next payment")}: {formatDateOnly(debt.next_payment_date, locale)} · {money.fmtAmountFull(debt.minimum_payment, debt.currency)}</p>
                       <div className="flex items-center gap-2">
                         {!debt.is_active && <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs text-titanium">{tx(locale, "Inactive")}</span>}
                         <button
@@ -3237,7 +3381,7 @@ function CashflowView({
                       <p className="font-medium text-ink">{debt.name}</p>
                       <p className="text-xs text-titanium">{formatDateOnly(debt.next_payment_date, locale)}</p>
                     </div>
-                    <p className="font-semibold text-ink">{formatCurrency(debt.minimum_payment, debt.currency)}</p>
+                    <p className="font-semibold text-ink">{money.fmtAmountFull(debt.minimum_payment, debt.currency)}</p>
                   </div>
                 ))}
               </div>
@@ -3252,8 +3396,16 @@ function CashflowView({
         <section className="glass-panel apple-card p-5">
           <div className="mb-5 flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-2xl font-semibold tracking-[-0.035em] text-ink">{budgetEditingId ? (tx(locale, "Edit budget")) : (tx(locale, "Add monthly budget"))}</h3>
-              <p className="mt-1 text-sm text-titanium">{tx(locale, "Set category budgets and compare them with this month's expenses.")}</p>
+              <h3 className="text-2xl font-semibold tracking-[-0.035em] text-ink">
+                {budgetEditingId
+                  ? tx(locale, budgetForm.category === totalBudgetCategory ? "Edit total budget" : "Edit category budget")
+                  : tx(locale, budgetForm.category === totalBudgetCategory ? "Add total budget" : "Add category budget")}
+              </h3>
+              <p className="mt-1 text-sm text-titanium">
+                {tx(locale, budgetForm.category === totalBudgetCategory
+                  ? "Set one total budget and compare it with this month's expenses."
+                  : "Set a limit for one spending category.")}
+              </p>
             </div>
             {budgetEditingId && (
               <button className="focus-ring rounded-full border border-line px-3 py-2 text-xs text-titanium hover:text-ink" onClick={onResetBudget} type="button">
@@ -3263,17 +3415,60 @@ function CashflowView({
           </div>
 
           <form className="space-y-4" onSubmit={onSaveBudget}>
+            <div className="grid grid-cols-2 gap-2 rounded-2xl border border-line bg-[var(--surface-muted)] p-1.5" role="group" aria-label={tx(locale, "Budget mode")}>
+              <button
+                className={clsx(
+                  "focus-ring min-h-11 rounded-xl px-3 text-sm font-semibold transition",
+                  budgetForm.category === totalBudgetCategory ? "bg-[var(--accent)] text-[var(--accent-ink)] shadow-sm" : "text-titanium hover:bg-panel hover:text-ink",
+                )}
+                onClick={() => onUpdateBudgetForm("category", totalBudgetCategory)}
+                type="button"
+              >
+                {tx(locale, "Total budget")}
+              </button>
+              <button
+                className={clsx(
+                  "focus-ring min-h-11 rounded-xl px-3 text-sm font-semibold transition",
+                  budgetForm.category !== totalBudgetCategory ? "bg-[var(--accent)] text-[var(--accent-ink)] shadow-sm" : "text-titanium hover:bg-panel hover:text-ink",
+                )}
+                onClick={() => onUpdateBudgetForm("category", cashflowCategories.expense[0].id)}
+                type="button"
+              >
+                {tx(locale, "Category budget")}
+              </button>
+            </div>
+
             <Field label={tx(locale, "Month")}>
               <input className="input-control focus-ring w-full px-3 text-ink" type="month" value={budgetForm.month} onChange={(event) => onUpdateBudgetForm("month", event.target.value)} required />
             </Field>
 
-            <Field label={tx(locale, "Category")}>
-              <select className="input-control focus-ring w-full px-3 text-ink" value={budgetForm.category} onChange={(event) => onUpdateBudgetForm("category", event.target.value)}>
-                {cashflowCategories.expense.map((category) => (
-                  <option key={category.id} value={category.id}>{zh ? category.zh : category.en}</option>
-                ))}
-              </select>
-            </Field>
+            {budgetForm.category !== totalBudgetCategory && (
+              <Field label={tx(locale, "Category")}>
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 xl:grid-cols-5">
+                  {cashflowCategories.expense.map((category) => {
+                    const CategoryIcon = cashflowCategoryIcons[category.id as keyof typeof cashflowCategoryIcons] ?? Ellipsis;
+                    const active = budgetForm.category === category.id;
+                    return (
+                      <button
+                        aria-pressed={active}
+                        className={clsx(
+                          "focus-ring flex min-h-[76px] flex-col items-center justify-center gap-2 rounded-2xl border px-2 py-3 text-center text-xs font-medium transition duration-200 xl:min-h-[82px]",
+                          active
+                            ? "border-[var(--accent)] bg-[var(--accent-soft)] text-ink shadow-sm"
+                            : "border-line bg-[var(--surface-muted)] text-titanium hover:-translate-y-0.5 hover:border-[var(--accent)] hover:bg-panel hover:text-ink",
+                        )}
+                        key={category.id}
+                        onClick={() => onUpdateBudgetForm("category", category.id)}
+                        type="button"
+                      >
+                        <CategoryIcon className={active ? "text-[var(--accent)]" : ""} size={19} />
+                        <span>{getCategoryLabel(category.id, locale)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </Field>
+            )}
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label={tx(locale, "Budget amount")}>
@@ -3281,8 +3476,9 @@ function CashflowView({
               </Field>
               <Field label={tx(locale, "Currency")}>
                 <select className="input-control focus-ring w-full px-3 text-ink" value={budgetForm.currency} onChange={(event) => onUpdateBudgetForm("currency", event.target.value as Currency)}>
-                  <option value="USD">USD</option>
-                  <option value="TWD">TWD</option>
+                  {supportedCurrencies.map((currency) => (
+                    <option key={currency} value={currency}>{currency}</option>
+                  ))}
                 </select>
               </Field>
             </div>
@@ -3298,65 +3494,47 @@ function CashflowView({
 
             <button className="primary-button focus-ring flex min-h-12 w-full items-center justify-center gap-2 rounded-full px-4 font-medium" type="submit">
               <Plus size={17} />
-              {budgetEditingId ? (tx(locale, "Update budget")) : (tx(locale, "Save budget"))}
+              {budgetEditingId
+                ? tx(locale, budgetForm.category === totalBudgetCategory ? "Update total budget" : "Update category budget")
+                : tx(locale, budgetForm.category === totalBudgetCategory ? "Save total budget" : "Save category budget")}
             </button>
           </form>
         </section>
 
         <section className="space-y-5">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <MetricCard label={tx(locale, "Monthly budget")} value={formatBudgetLimitTotal(budgetRows)} icon={<ReceiptText size={20} />} />
-            <MetricCard label={tx(locale, "Spent")} value={formatBudgetSpentTotal(budgetRows)} trend={budgetRows.length ? -1 : undefined} icon={<Activity size={20} />} />
+            <MetricCard label={tx(locale, "Monthly budget")} value={formatBudgetLimitTotal(summaryBudgetRows, money)} icon={<ReceiptText size={20} />} />
+            <MetricCard label={tx(locale, "Spent")} value={formatBudgetSpentTotal(summaryBudgetRows, money)} trend={summaryBudgetRows.length ? -1 : undefined} icon={<Activity size={20} />} />
             <MetricCard label={tx(locale, "Over budget")} value={String(overBudgetRows.length)} trend={overBudgetRows.length ? -1 : undefined} icon={<ListChecks size={20} />} />
           </div>
 
           <section className="glass-panel apple-card p-5">
             <div className="mb-5">
-              <h3 className="text-xl font-semibold text-ink">{tx(locale, "Category budgets")}</h3>
-              <p className="mt-1 text-sm text-titanium">{tx(locale, "Showing this month's budgets. Click an item to edit.")}</p>
+              <h3 className="text-xl font-semibold text-ink">{tx(locale, "Total budget")}</h3>
+              <p className="mt-1 text-sm text-titanium">{tx(locale, "Showing this month's total budget. Click the item to edit.")}</p>
             </div>
 
-            {!budgetRows.length ? (
+            {!totalBudgetRows.length ? (
               <div className="subtle-panel apple-card-sm p-8 text-center text-titanium">
-                {tx(locale, "Add your first budget to see spending, remaining amount, and over-budget status.")}
+                {tx(locale, "Add a total budget to see spending, remaining amount, and over-budget status.")}
               </div>
             ) : (
-              <div className="grid gap-3">
-                {budgetRows.map((row) => (
-                  <article className="subtle-panel apple-card-sm p-4" key={row.budget.id}>
-                    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-                      <button className="text-left" onClick={() => onEditBudget(row.budget)} type="button">
-                        <span className="block font-semibold text-ink">{getCategoryLabel(row.budget.category, locale)}</span>
-                        <span className="mt-1 block text-xs text-titanium">{formatDateOnly(row.budget.month, locale)} · {row.budget.currency}</span>
-                      </button>
-                      <div className="text-right">
-                        <p className={clsx("font-semibold", row.remaining < 0 ? "text-rose" : "text-ink")}>{formatCurrency(row.remaining, row.budget.currency)}</p>
-                        <p className="mt-1 text-xs text-titanium">{tx(locale, "Remaining")}</p>
-                      </div>
-                    </div>
-                    <div className="mb-3 h-2 rounded-full bg-white/10">
-                      <div
-                        className={clsx("h-2 rounded-full", row.percentUsed > 100 ? "bg-rose" : "bg-mint")}
-                        style={{ width: `${Math.min(100, row.percentUsed)}%` }}
-                      />
-                    </div>
-                    <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-titanium">
-                      <span>{tx(locale, "Spent")} {formatCurrency(row.spent, row.budget.currency)} / {formatCurrency(row.budget.amount, row.budget.currency)}</span>
-                      <div className="flex items-center gap-2">
-                        {row.remaining < 0 && <span className="rounded-full bg-rose/10 px-2.5 py-1 text-rose">{tx(locale, "Over budget")}</span>}
-                        <button
-                          aria-label={zh ? `刪除 ${getCategoryLabel(row.budget.category, locale)} 預算` : `Delete ${getCategoryLabel(row.budget.category, locale)} budget`}
-                          className="focus-ring rounded-xl border border-line p-2 text-titanium transition hover:bg-rose/10 hover:text-rose"
-                          onClick={() => onDeleteBudget(row.budget.id)}
-                          type="button"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </div>
-                  </article>
-                ))}
+              <BudgetRowsList rows={totalBudgetRows} locale={locale} money={money} onDelete={onDeleteBudget} onEdit={onEditBudget} type="total" />
+            )}
+          </section>
+
+          <section className="glass-panel apple-card p-5">
+            <div className="mb-5">
+              <h3 className="text-xl font-semibold text-ink">{tx(locale, "Category budgets")}</h3>
+              <p className="mt-1 text-sm text-titanium">{tx(locale, "Showing this month's category budgets. Click an item to edit.")}</p>
+            </div>
+
+            {!categoryBudgetRows.length ? (
+              <div className="subtle-panel apple-card-sm p-8 text-center text-titanium">
+                {tx(locale, "Add a category budget to track category spending.")}
               </div>
+            ) : (
+              <BudgetRowsList rows={categoryBudgetRows} locale={locale} money={money} onDelete={onDeleteBudget} onEdit={onEditBudget} type="category" />
             )}
           </section>
         </section>
@@ -3395,7 +3573,7 @@ function CashflowView({
                       {transaction.notes && <span className="mt-1 block text-xs text-titanium">{transaction.notes}</span>}
                     </button>
                     <span className={clsx("font-semibold", transaction.transaction_type === "income" ? "text-mint" : "text-rose")}>
-                      {transaction.transaction_type === "income" ? "+" : "-"}{formatCurrency(transaction.amount, transaction.currency)}
+                      {transaction.transaction_type === "income" ? "+" : "-"}{money.fmtAmountFull(transaction.amount, transaction.currency)}
                     </span>
                   </div>
                   <div className="mt-3 flex justify-end">
@@ -3445,8 +3623,8 @@ function CashflowView({
                       </span>
                     </button>
                     <div className="text-right">
-                      <p className="font-semibold text-ink">{formatCurrency(expense.amount, expense.currency)}</p>
-                      {expense.is_subscription && <p className="mt-1 text-xs text-titanium">{tx(locale, "Annual")}: {formatRecurringAnnualizedAmount(expense)}</p>}
+                      <p className="font-semibold text-ink">{money.fmtAmountFull(expense.amount, expense.currency)}</p>
+                      {expense.is_subscription && <p className="mt-1 text-xs text-titanium">{tx(locale, "Annual")}: {formatRecurringAnnualizedAmount(expense, money)}</p>}
                     </div>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -3487,12 +3665,12 @@ function CashflowView({
                       <span className="mt-1 block text-xs text-titanium">{getDebtTypeLabel(debt.debt_type, locale)} · {debt.lender || (tx(locale, "No lender"))}</span>
                     </button>
                     <div className="text-right">
-                      <p className="font-semibold text-ink">{formatCurrency(debt.remaining_principal, debt.currency)}</p>
+                      <p className="font-semibold text-ink">{money.fmtAmountFull(debt.remaining_principal, debt.currency)}</p>
                       <p className="mt-1 text-xs text-titanium">{tx(locale, "APR")}: {debt.interest_rate.toFixed(2)}%</p>
                     </div>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-xs text-titanium">{tx(locale, "Next payment")}: {formatDateOnly(debt.next_payment_date, locale)} · {formatCurrency(debt.minimum_payment, debt.currency)}</p>
+                    <p className="text-xs text-titanium">{tx(locale, "Next payment")}: {formatDateOnly(debt.next_payment_date, locale)} · {money.fmtAmountFull(debt.minimum_payment, debt.currency)}</p>
                     <button
                       aria-label={zh ? `刪除 ${debt.name}` : `Delete ${debt.name}`}
                       className="focus-ring rounded-xl border border-line p-2 text-titanium transition hover:bg-rose/10 hover:text-rose"
@@ -3521,6 +3699,7 @@ function HoldingsView({
   locale,
   t,
   userId,
+  onClearAll,
   onDelete,
   onEdit,
   onReset,
@@ -3536,6 +3715,7 @@ function HoldingsView({
   locale: Locale;
   t: ReturnType<typeof getDictionary>;
   userId: string;
+  onClearAll: () => void;
   onDelete: (id: string) => void;
   onEdit: (holding: Holding) => void;
   onReset: () => void;
@@ -3682,8 +3862,9 @@ function HoldingsView({
                   value={form.cost_currency}
                   onChange={(event) => onUpdateForm("cost_currency", event.target.value as Currency)}
                 >
-                  <option value="USD">USD</option>
-                  <option value="TWD">TWD</option>
+                  {supportedCurrencies.map((currency) => (
+                    <option key={currency} value={currency}>{currency}</option>
+                  ))}
                 </select>
               </Field>
               <div className={clsx("flex gap-3 md:col-span-2", editingWalletCost ? "xl:col-span-3" : "xl:col-span-4")}>
@@ -3715,6 +3896,16 @@ function HoldingsView({
               <div>
                 <h3 className="text-xl font-semibold text-ink">{t.holdings}</h3>
               </div>
+              {enriched.length > 0 && (
+                <button
+                  className="focus-ring inline-flex items-center gap-2 rounded-full border border-rose/30 px-4 py-2 text-sm font-medium text-rose transition hover:bg-rose/10"
+                  onClick={onClearAll}
+                  type="button"
+                >
+                  <Trash2 size={15} />
+                  {tx(locale, "Clear all holdings")}
+                </button>
+              )}
             </div>
             <HoldingsTable
               enriched={enriched}
@@ -3725,6 +3916,65 @@ function HoldingsView({
           </section>
         </div>
       )}
+    </div>
+  );
+}
+
+function BudgetRowsList({
+  rows,
+  locale,
+  money,
+  onDelete,
+  onEdit,
+  type,
+}: {
+  rows: BudgetRow[];
+  locale: Locale;
+  money: MoneyFmt;
+  onDelete: (id: string) => void;
+  onEdit: (budget: MonthlyBudget) => void;
+  type: "total" | "category";
+}) {
+  const deleteLabel = type === "total" ? tx(locale, "Delete total budget") : tx(locale, "Delete category budget");
+
+  return (
+    <div className="grid gap-3">
+      {rows.map((row) => (
+        <article className="subtle-panel apple-card-sm p-4" key={row.budget.id}>
+          <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+            <button className="text-left" onClick={() => onEdit(row.budget)} type="button">
+              <span className="block font-semibold text-ink">
+                {type === "total" ? tx(locale, "Total budget") : getCategoryLabel(row.budget.category, locale)}
+              </span>
+              <span className="mt-1 block text-xs text-titanium">{formatDateOnly(row.budget.month, locale)} · {row.budget.currency}</span>
+            </button>
+            <div className="text-right">
+              <p className={clsx("font-semibold", row.remaining < 0 ? "text-rose" : "text-ink")}>{money.fmtAmountFull(row.remaining, row.budget.currency)}</p>
+              <p className="mt-1 text-xs text-titanium">{tx(locale, "Remaining")}</p>
+            </div>
+          </div>
+          <div className="mb-3 h-2 rounded-full bg-white/10">
+            <div
+              className={clsx("h-2 rounded-full", row.percentUsed > 100 ? "bg-rose" : "bg-mint")}
+              style={{ width: `${Math.min(100, row.percentUsed)}%` }}
+            />
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-titanium">
+            <span>{tx(locale, "Spent")} {money.fmtAmountFull(row.spent, row.budget.currency)} / {money.fmtAmountFull(row.budget.amount, row.budget.currency)}</span>
+            <div className="flex items-center gap-2">
+              {row.remaining < 0 && <span className="rounded-full bg-rose/10 px-2.5 py-1 text-rose">{tx(locale, "Over budget")}</span>}
+              <button
+                aria-label={deleteLabel}
+                className="focus-ring rounded-xl border border-line p-2 text-titanium transition hover:bg-rose/10 hover:text-rose"
+                onClick={() => onDelete(row.budget.id)}
+                type="button"
+              >
+                <Trash2 size={16} />
+              </button>
+            </div>
+          </div>
+        </article>
+      ))}
     </div>
   );
 }
@@ -4063,6 +4313,7 @@ function AnalysisView({
   locale: Locale;
   t: ReturnType<typeof getDictionary>;
 }) {
+  const money = useMoney();
   const zh = locale === "zh";
   const portfolioHoldings = aggregateHoldingsForOverview(enriched);
   const topHoldings = portfolioHoldings.slice(0, 6);
@@ -4319,12 +4570,12 @@ function AnalysisView({
               <p className="text-sm font-semibold text-ink">{scenario.name}</p>
               <p className="mt-1 text-xs leading-5 text-titanium">{scenario.detail}</p>
               <p className="mt-5 text-2xl font-semibold tracking-[-0.04em] text-rose">
-                {formatCurrency(scenario.impact)}
+                {money.fmtUsd(scenario.impact)}
               </p>
               <p className="mt-1 text-sm font-medium text-rose">{formatPercent(scenario.impactPercent)}</p>
               <div className="mt-4 border-t border-line pt-3 text-xs text-titanium">
                 {tx(locale, "Estimated value after shock")}{" "}
-                <span className="font-semibold text-ink">{formatCurrency(scenario.remainingValue)}</span>
+                <span className="font-semibold text-ink">{money.fmtUsd(scenario.remainingValue)}</span>
               </div>
             </div>
           ))}
@@ -4379,6 +4630,7 @@ function ContributionPanel({
   subtitle: string;
   title: string;
 }) {
+  const money = useMoney();
   return (
     <section className="glass-panel apple-card p-5 sm:p-6">
       <h3 className="text-xl font-semibold text-ink">{title}</h3>
@@ -4397,7 +4649,7 @@ function ContributionPanel({
                   </div>
                   <div className="shrink-0 text-right">
                     <p className={clsx("text-sm font-semibold", value >= 0 ? "text-mint" : "text-rose")}>
-                      {formatCurrency(value)}
+                      {money.fmtUsd(value)}
                     </p>
                     <p className={clsx("text-xs", percent >= 0 ? "text-mint" : "text-rose")}>
                       {formatPercent(percent)}
@@ -4425,16 +4677,29 @@ function ContributionPanel({
 }
 
 function SettingsView({
+  displayCurrency,
   locale,
   market,
   t,
+  onDisplayCurrencyChange,
   onLocaleChange,
 }: {
+  displayCurrency: Currency;
   locale: Locale;
   market: MarketResponse | null;
   t: ReturnType<typeof getDictionary>;
+  onDisplayCurrencyChange: (currency: Currency) => void;
   onLocaleChange: (locale: Locale) => void;
 }) {
+  const usdRate = market
+    ? {
+        USD: null,
+        TWD: market.fx.usdToTwd,
+        EUR: market.fx.usdToEur,
+        JPY: market.fx.usdToJpy,
+        KRW: market.fx.usdToKrw,
+      }[displayCurrency]
+    : null;
   return (
     <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
       <section className="glass-panel apple-card p-5">
@@ -4468,11 +4733,26 @@ function SettingsView({
           <Globe2 size={20} className="text-mint" />
           <h3 className="text-xl font-semibold text-ink">{t.baseCurrency}</h3>
         </div>
-        <div className="subtle-panel apple-card-sm p-5">
-          <p className="text-4xl font-semibold text-ink">USD</p>
-          <p className="mt-3 text-sm leading-6 text-titanium">{t.baseCurrencyHelp}</p>
-          {market && <p className="mt-4 text-sm text-titanium">1 USD = {market.fx.usdToTwd.toFixed(2)} TWD</p>}
+        <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
+          {supportedCurrencies.map((item) => (
+            <button
+              className={clsx(
+                "focus-ring rounded-2xl border border-line px-3 py-4 text-center",
+                displayCurrency === item ? "primary-button" : "interactive-muted text-ink",
+              )}
+              key={item}
+              onClick={() => onDisplayCurrencyChange(item)}
+              type="button"
+            >
+              <span className="block text-base font-semibold">{item}</span>
+              <span className="block text-xs opacity-80">{currencySymbols[item]}</span>
+            </button>
+          ))}
         </div>
+        <p className="mt-4 text-sm leading-6 text-titanium">{t.baseCurrencyHelp}</p>
+        {usdRate !== null && usdRate !== undefined && (
+          <p className="mt-2 text-sm text-titanium">1 USD = {usdRate.toFixed(2)} {displayCurrency}</p>
+        )}
       </section>
       <section className="glass-panel apple-card p-5">
         <div className="mb-5 flex items-center gap-2">
@@ -4502,6 +4782,7 @@ function HoldingsTable({
   onDelete: (id: string) => void;
   onEdit: (holding: Holding) => void;
 }) {
+  const money = useMoney();
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
   if (!enriched.length) {
@@ -4568,9 +4849,9 @@ function HoldingsTable({
                   onEdit={allowEdit ? onEdit : undefined}
                 />
               </td>
-              <td className="whitespace-nowrap px-4 py-4 text-right text-ink">{formatCurrency(holding.valueUsd)}</td>
+              <td className="whitespace-nowrap px-4 py-4 text-right text-ink">{money.fmtUsd(holding.valueUsd)}</td>
               <td className={clsx("whitespace-nowrap px-4 py-4 text-right", holding.cost_known === false ? "text-titanium" : holding.gainUsd >= 0 ? "text-mint" : "text-rose")}>
-                {holding.cost_known === false ? <UnknownCostLabel label="N/A" /> : <><span className="block">{formatCurrency(holding.gainUsd)}</span><span className="text-xs">{formatPercent(holding.gainPercent)}</span></>}
+                {holding.cost_known === false ? <UnknownCostLabel label="N/A" /> : <><span className="block">{money.fmtUsd(holding.gainUsd)}</span><span className="text-xs">{formatPercent(holding.gainPercent)}</span></>}
               </td>
               {!compact && <td className="whitespace-nowrap px-4 py-4 text-right text-ink">{holding.allocationPercent.toFixed(1)}%</td>}
               <td className="px-4 py-4 text-right">
@@ -4723,6 +5004,7 @@ function RankPanel({
   t: ReturnType<typeof getDictionary>;
   title: string;
 }) {
+  const money = useMoney();
   return (
     <section className="glass-panel apple-card p-5">
       <h3 className="mb-4 text-xl font-semibold text-ink">{title}</h3>
@@ -4735,7 +5017,7 @@ function RankPanel({
             </div>
             <div className={holding.gainPercent >= 0 ? "text-right text-mint" : "text-right text-rose"}>
               <p className="font-semibold">{formatPercent(holding.gainPercent)}</p>
-              <p className="text-xs">{formatCurrency(holding.gainUsd)}</p>
+              <p className="text-xs">{money.fmtUsd(holding.gainUsd)}</p>
             </div>
           </div>
         ))}
@@ -4772,6 +5054,7 @@ function ChartPanel({ data }: { data: Array<{ name: string; value: number }> }) 
 }
 
 function ChartLegend({ data }: { data: Array<{ name: string; value: number }> }) {
+  const money = useMoney();
   return (
     <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
       {data.slice(0, 8).map((entry, index) => (
@@ -4780,7 +5063,7 @@ function ChartLegend({ data }: { data: Array<{ name: string; value: number }> })
             <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: chartColors[index % chartColors.length] }} />
             <span className="truncate">{entry.name}</span>
           </span>
-          <span className="shrink-0 font-medium text-ink">{formatCurrency(entry.value)}</span>
+          <span className="shrink-0 font-medium text-ink">{money.fmtUsd(entry.value)}</span>
         </div>
       ))}
     </div>
@@ -4796,6 +5079,7 @@ function MoneyTooltip({
   label?: string;
   payload?: Array<{ color?: string; dataKey?: string; name?: string; value?: number }>;
 }) {
+  const money = useMoney();
   if (!active || !payload?.length) {
     return null;
   }
@@ -4810,7 +5094,7 @@ function MoneyTooltip({
               <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color ?? "var(--accent)" }} />
               {item.name ?? item.dataKey}
             </span>
-            <span className="font-medium text-ink">{formatCurrency(Number(item.value ?? 0))}</span>
+            <span className="font-medium text-ink">{money.fmtUsd(Number(item.value ?? 0))}</span>
           </p>
         ))}
       </div>
@@ -4819,6 +5103,7 @@ function MoneyTooltip({
 }
 
 function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number }> }) {
+  const money = useMoney();
   if (!active || !payload?.length) {
     return null;
   }
@@ -4826,7 +5111,7 @@ function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{
   return (
     <div className="glass-panel apple-card-sm px-3 py-2 text-sm">
       <p className="text-ink">{item.name}</p>
-      <p className="text-titanium">{formatCurrency(item.value)}</p>
+      <p className="text-titanium">{money.fmtUsd(item.value)}</p>
     </div>
   );
 }
@@ -4842,9 +5127,10 @@ function AverageCostValue({
   onEdit?: (holding: Holding) => void;
   unknownLabel: string;
 }) {
+  const money = useMoney();
   const content = holding.cost_known === false
     ? <UnknownCostLabel label={unknownLabel} />
-    : formatAverageCost(holding);
+    : formatAverageCost(holding, money);
 
   if (holding.source_kind !== "wallet" || !onEdit) return content;
 
@@ -4860,8 +5146,8 @@ function AverageCostValue({
   );
 }
 
-function formatAverageCost(holding: EnrichedHolding) {
-  return formatCurrency(holding.average_cost, holding.cost_currency);
+function formatAverageCost(holding: EnrichedHolding, money: MoneyFmt) {
+  return money.fmtAmountFull(holding.average_cost, holding.cost_currency);
 }
 
 function SourceBreakdown({
@@ -4871,6 +5157,7 @@ function SourceBreakdown({
   sources: EnrichedHolding[];
   t: ReturnType<typeof getDictionary>;
 }) {
+  const money = useMoney();
   return (
     <div className="grid gap-2">
       {sources.map((source) => (
@@ -4885,7 +5172,7 @@ function SourceBreakdown({
           </div>
           <div>
             <p className="text-xs text-titanium">{t.value}</p>
-            <p className="mt-1 text-ink">{formatCurrency(source.valueUsd)}</p>
+            <p className="mt-1 text-ink">{money.fmtUsd(source.valueUsd)}</p>
           </div>
           <div>
             <p className="text-xs text-titanium">{t.averageCost}</p>
@@ -4908,10 +5195,11 @@ function buildSourceMap(holdings: EnrichedHolding[]) {
 }
 
 function getCategoryLabel(categoryId: string, locale: Locale) {
+  if (categoryId === totalBudgetCategory) return tx(locale, "Total budget");
   const allCategories = [...cashflowCategories.income, ...cashflowCategories.expense];
   const category = allCategories.find((item) => item.id === categoryId);
   if (!category) return categoryId;
-  return locale === "zh" ? category.zh : category.en;
+  return tx(locale, category.en);
 }
 
 function getRecurringCategoryLabel(categoryId: string, locale: Locale) {
@@ -4969,13 +5257,14 @@ function getCashflowCalendarEvents(
   recurringExpenses: RecurringExpense[],
   debts: Debt[],
   locale: Locale,
+  money: MoneyFmt,
 ): CashflowCalendarEvent[] {
   const visibleMonthKeys = new Set(getRecentMonthKeys(12).concat(getFutureMonthKeys(12)));
   const events: CashflowCalendarEvent[] = [];
 
   transactions.forEach((transaction) => {
     events.push({
-      amount: `${transaction.transaction_type === "income" ? "+" : "-"}${formatCurrency(transaction.amount, transaction.currency)}`,
+      amount: `${transaction.transaction_type === "income" ? "+" : "-"}${money.fmtAmount(transaction.amount, transaction.currency)}`,
       date: transaction.transaction_date,
       kind: transaction.transaction_type,
       label: getCategoryLabel(transaction.category, locale),
@@ -4993,7 +5282,7 @@ function getCashflowCalendarEvents(
           const lastDay = new Date(year, month, 0).getDate();
           const day = Math.min(dueDate.getDate(), lastDay);
           events.push({
-            amount: formatCurrency(expense.amount, expense.currency),
+            amount: money.fmtAmount(expense.amount, expense.currency),
             date: `${monthKey}-${String(day).padStart(2, "0")}`,
             kind: "recurring",
             label: expense.is_subscription ? (tx(locale, "Subscription")) : getRecurringCategoryLabel(expense.category, locale),
@@ -5004,7 +5293,7 @@ function getCashflowCalendarEvents(
       }
 
       events.push({
-        amount: formatCurrency(expense.amount, expense.currency),
+        amount: money.fmtAmount(expense.amount, expense.currency),
         date: expense.next_due_date,
         kind: "recurring",
         label: expense.is_subscription ? (tx(locale, "Subscription")) : getRecurringCategoryLabel(expense.category, locale),
@@ -5016,7 +5305,7 @@ function getCashflowCalendarEvents(
     .filter((debt) => debt.is_active)
     .forEach((debt) => {
       events.push({
-        amount: formatCurrency(debt.minimum_payment, debt.currency),
+        amount: money.fmtAmount(debt.minimum_payment, debt.currency),
         date: debt.next_payment_date,
         kind: "debt",
         label: getDebtTypeLabel(debt.debt_type, locale),
@@ -5041,62 +5330,62 @@ function calendarEventTextClass(kind: CashflowCalendarEvent["kind"]) {
   return "text-titanium";
 }
 
-function formatCashflowTotals(transactions: CashflowTransaction[], type: CashflowType) {
-  return formatCurrencyBuckets(
+function formatCashflowTotals(transactions: CashflowTransaction[], type: CashflowType, money: MoneyFmt) {
+  return formatCurrencyBuckets(money,
     transactions
       .filter((transaction) => transaction.transaction_type === type)
       .reduce<Record<Currency, number>>((acc, transaction) => {
         acc[transaction.currency] = (acc[transaction.currency] ?? 0) + transaction.amount;
         return acc;
-      }, { USD: 0, TWD: 0 }),
+      }, emptyCurrencyBuckets()),
   );
 }
 
-function formatNetCashflow(transactions: CashflowTransaction[]) {
-  return formatCurrencyBuckets(
+function formatNetCashflow(transactions: CashflowTransaction[], money: MoneyFmt) {
+  return formatCurrencyBuckets(money,
     transactions.reduce<Record<Currency, number>>((acc, transaction) => {
       const sign = transaction.transaction_type === "income" ? 1 : -1;
       acc[transaction.currency] = (acc[transaction.currency] ?? 0) + transaction.amount * sign;
       return acc;
-    }, { USD: 0, TWD: 0 }),
+    }, emptyCurrencyBuckets()),
   );
 }
 
-function formatRecurringMonthlyTotal(expenses: RecurringExpense[]) {
-  return formatCurrencyBuckets(
+function formatRecurringMonthlyTotal(expenses: RecurringExpense[], money: MoneyFmt) {
+  return formatCurrencyBuckets(money,
     expenses.reduce<Record<Currency, number>>((acc, expense) => {
       const monthlyAmount = expense.frequency === "monthly" ? expense.amount : expense.amount / 12;
       acc[expense.currency] = (acc[expense.currency] ?? 0) + monthlyAmount;
       return acc;
-    }, { USD: 0, TWD: 0 }),
+    }, emptyCurrencyBuckets()),
   );
 }
 
-function formatRecurringAnnualTotal(expenses: RecurringExpense[]) {
-  return formatCurrencyBuckets(
+function formatRecurringAnnualTotal(expenses: RecurringExpense[], money: MoneyFmt) {
+  return formatCurrencyBuckets(money,
     expenses.reduce<Record<Currency, number>>((acc, expense) => {
       const annualAmount = expense.frequency === "monthly" ? expense.amount * 12 : expense.amount;
       acc[expense.currency] = (acc[expense.currency] ?? 0) + annualAmount;
       return acc;
-    }, { USD: 0, TWD: 0 }),
+    }, emptyCurrencyBuckets()),
   );
 }
 
-function formatDebtPrincipalTotal(debts: Debt[]) {
-  return formatCurrencyBuckets(
+function formatDebtPrincipalTotal(debts: Debt[], money: MoneyFmt) {
+  return formatCurrencyBuckets(money,
     debts.reduce<Record<Currency, number>>((acc, debt) => {
       acc[debt.currency] = (acc[debt.currency] ?? 0) + debt.remaining_principal;
       return acc;
-    }, { USD: 0, TWD: 0 }),
+    }, emptyCurrencyBuckets()),
   );
 }
 
-function formatDebtMonthlyPaymentTotal(debts: Debt[]) {
-  return formatCurrencyBuckets(
+function formatDebtMonthlyPaymentTotal(debts: Debt[], money: MoneyFmt) {
+  return formatCurrencyBuckets(money,
     debts.reduce<Record<Currency, number>>((acc, debt) => {
       acc[debt.currency] = (acc[debt.currency] ?? 0) + debt.minimum_payment;
       return acc;
-    }, { USD: 0, TWD: 0 }),
+    }, emptyCurrencyBuckets()),
   );
 }
 
@@ -5121,7 +5410,7 @@ function getBudgetRows(budgets: MonthlyBudget[], transactions: CashflowTransacti
       const spent = transactions
         .filter((transaction) => transaction.transaction_type === "expense")
         .filter((transaction) => transaction.currency === budget.currency)
-        .filter((transaction) => transaction.category === budget.category)
+        .filter((transaction) => budget.category === totalBudgetCategory || transaction.category === budget.category)
         .filter((transaction) => transaction.transaction_date.slice(0, 7) === budget.month.slice(0, 7))
         .reduce((sum, transaction) => sum + transaction.amount, 0);
 
@@ -5139,21 +5428,21 @@ function getBudgetRows(budgets: MonthlyBudget[], transactions: CashflowTransacti
     });
 }
 
-function formatBudgetLimitTotal(rows: BudgetRow[]) {
-  return formatCurrencyBuckets(
+function formatBudgetLimitTotal(rows: BudgetRow[], money: MoneyFmt) {
+  return formatCurrencyBuckets(money,
     rows.reduce<Record<Currency, number>>((acc, row) => {
       acc[row.budget.currency] = (acc[row.budget.currency] ?? 0) + row.budget.amount;
       return acc;
-    }, { USD: 0, TWD: 0 }),
+    }, emptyCurrencyBuckets()),
   );
 }
 
-function formatBudgetSpentTotal(rows: BudgetRow[]) {
-  return formatCurrencyBuckets(
+function formatBudgetSpentTotal(rows: BudgetRow[], money: MoneyFmt) {
+  return formatCurrencyBuckets(money,
     rows.reduce<Record<Currency, number>>((acc, row) => {
       acc[row.budget.currency] = (acc[row.budget.currency] ?? 0) + row.spent;
       return acc;
-    }, { USD: 0, TWD: 0 }),
+    }, emptyCurrencyBuckets()),
   );
 }
 
@@ -5214,13 +5503,13 @@ function formatPressureRatio(overview: MonthlyCashflowOverview) {
   return `${overview.pressureRatio.toFixed(1)}%`;
 }
 
-function getDebtPrincipalUsd(debts: Debt[], twdToUsd: number) {
+function getDebtPrincipalUsd(debts: Debt[], twdToUsd: CurrencyFxInput) {
   return debts
     .filter((debt) => debt.is_active)
     .reduce((sum, debt) => sum + currencyAmountToUsd(debt.remaining_principal, debt.currency, twdToUsd), 0);
 }
 
-function getMonthlyCashflowChartData(transactions: CashflowTransaction[], twdToUsd: number, locale: Locale) {
+function getMonthlyCashflowChartData(transactions: CashflowTransaction[], twdToUsd: CurrencyFxInput, locale: Locale) {
   const monthKeys = getRecentMonthKeys(6);
   const rows = monthKeys.map((monthKey) => ({
     expense: 0,
@@ -5242,7 +5531,7 @@ function getMonthlyCashflowChartData(transactions: CashflowTransaction[], twdToU
   return rows;
 }
 
-function getExpenseCategoryChartData(transactions: CashflowTransaction[], twdToUsd: number, locale: Locale) {
+function getExpenseCategoryChartData(transactions: CashflowTransaction[], twdToUsd: CurrencyFxInput, locale: Locale) {
   const totals = transactions
     .filter((transaction) => transaction.transaction_type === "expense")
     .filter((transaction) => isSameMonth(transaction.transaction_date))
@@ -5258,7 +5547,7 @@ function getExpenseCategoryChartData(transactions: CashflowTransaction[], twdToU
     .sort((a, b) => b.value - a.value);
 }
 
-function getFixedExpenseTrendData(expenses: RecurringExpense[], twdToUsd: number, locale: Locale) {
+function getFixedExpenseTrendData(expenses: RecurringExpense[], twdToUsd: CurrencyFxInput, locale: Locale) {
   const monthKeys = getFutureMonthKeys(6);
   return monthKeys.map((monthKey) => {
     const value = expenses
@@ -5277,7 +5566,7 @@ function getFixedExpenseTrendData(expenses: RecurringExpense[], twdToUsd: number
   });
 }
 
-function getSubscriptionAnnualizedData(expenses: RecurringExpense[], twdToUsd: number) {
+function getSubscriptionAnnualizedData(expenses: RecurringExpense[], twdToUsd: CurrencyFxInput) {
   return expenses
     .filter((expense) => expense.is_active && expense.is_subscription)
     .map((expense) => ({
@@ -5289,7 +5578,7 @@ function getSubscriptionAnnualizedData(expenses: RecurringExpense[], twdToUsd: n
     .slice(0, 8);
 }
 
-function getDebtDeclineData(debts: Debt[], twdToUsd: number, locale: Locale) {
+function getDebtDeclineData(debts: Debt[], twdToUsd: CurrencyFxInput, locale: Locale) {
   const activeDebts = debts.filter((debt) => debt.is_active);
   const totalPrincipal = activeDebts.reduce((sum, debt) => sum + currencyAmountToUsd(debt.remaining_principal, debt.currency, twdToUsd), 0);
   const monthlyPayment = activeDebts.reduce((sum, debt) => sum + currencyAmountToUsd(debt.minimum_payment, debt.currency, twdToUsd), 0);
@@ -5305,7 +5594,7 @@ function getDebtDeclineData(debts: Debt[], twdToUsd: number, locale: Locale) {
   });
 }
 
-function getNetWorthTrendData(transactions: CashflowTransaction[], currentNetWorthUsd: number, twdToUsd: number, locale: Locale) {
+function getNetWorthTrendData(transactions: CashflowTransaction[], currentNetWorthUsd: number, twdToUsd: CurrencyFxInput, locale: Locale) {
   const monthKeys = getRecentMonthKeys(6);
   const monthlyNet = new Map(monthKeys.map((monthKey) => [monthKey, 0]));
 
@@ -5375,9 +5664,9 @@ function compactUsd(value: number) {
 }
 
 
-function formatRecurringAnnualizedAmount(expense: RecurringExpense) {
+function formatRecurringAnnualizedAmount(expense: RecurringExpense, money: MoneyFmt) {
   const annualAmount = expense.frequency === "monthly" ? expense.amount * 12 : expense.amount;
-  return formatCurrency(annualAmount, expense.currency);
+  return money.fmtAmount(annualAmount, expense.currency);
 }
 
 function daysUntil(dateValue: string) {
@@ -5388,13 +5677,10 @@ function daysUntil(dateValue: string) {
   return Math.ceil((dueDate.getTime() - today.getTime()) / 86_400_000);
 }
 
-function formatCurrencyBuckets(values: Record<Currency, number>) {
-  const items = (Object.entries(values) as Array<[Currency, number]>)
-    .filter(([, value]) => Math.abs(value) > 0.000001)
-    .map(([currency, value]) => formatCurrency(value, currency));
-
-  return items.length ? items.join(" / ") : formatCurrency(0);
+function formatCurrencyBuckets(money: MoneyFmt, values: Record<Currency, number>) {
+  return money.fmtUsd(currencyBucketsToUsd(values, money.fx));
 }
+
 
 function holdingSourceKey(holding: EnrichedHolding) {
   const symbol = holding.symbol.toUpperCase();

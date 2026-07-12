@@ -1,6 +1,8 @@
 export type AssetType = "crypto" | "us_stock" | "tw_stock" | "cash";
-export type Currency = "USD" | "TWD";
 export type Locale = "en" | "zh" | "ja" | "ko" | "es";
+export const supportedCurrencies = ["USD", "TWD", "EUR", "JPY", "KRW"] as const;
+export type Currency = (typeof supportedCurrencies)[number];
+
 export type CashflowType = "income" | "expense";
 export type RecurringFrequency = "monthly" | "yearly";
 export type SubscriptionUsageStatus = "active" | "rarely_used" | "consider_canceling";
@@ -217,6 +219,12 @@ export type MarketResponse = {
   fx: {
     usdToTwd: number;
     twdToUsd: number;
+    usdToEur: number;
+    eurToUsd: number;
+    usdToJpy: number;
+    jpyToUsd: number;
+    usdToKrw: number;
+    krwToUsd: number;
   };
   refreshedAt: string;
 };

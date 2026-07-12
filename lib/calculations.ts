@@ -1,4 +1,5 @@
 import { tx } from "@/lib/i18n";
+import { supportedCurrencies } from "@/lib/types";
 import type {
   CashflowTransaction,
   Currency,
@@ -6,15 +7,19 @@ import type {
   EnrichedHolding,
   Holding,
   Locale,
+  MarketResponse,
   MarketQuote,
   RecurringExpense,
 } from "@/lib/types";
 
-export function formatCurrency(value: number, currency = "USD") {
+export type CurrencyFxInput = number | Partial<MarketResponse["fx"]>;
+
+export function formatCurrency(value: number, currency: Currency = "USD") {
+  const noMinorUnits = currency === "JPY" || currency === "KRW";
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency,
-    maximumFractionDigits: value > 1000 ? 0 : 2,
+    maximumFractionDigits: noMinorUnits || value > 1000 ? 0 : 2,
   }).format(value);
 }
 
@@ -31,7 +36,7 @@ export function enrichHoldings(
     const symbol = holding.symbol.toUpperCase();
     const quote = quotes[holding.id] ?? quotes[holding.market_data_id ?? ""] ?? quotes[symbol];
     const priceUsd = quote?.priceUsd ?? fallbackPriceUsd(holding, twdToUsd);
-    const costUsd = holding.cost_currency === "TWD" ? holding.average_cost * twdToUsd : holding.average_cost;
+    const costUsd = currencyAmountToUsd(holding.average_cost, holding.cost_currency, twdToUsd);
     const units = holding.asset_type === "tw_stock" ? holding.quantity * 1000 : holding.quantity;
     const valueUsd = units * priceUsd;
     const costKnown = holding.cost_known !== false;
@@ -141,7 +146,7 @@ function fallbackPriceUsd(holding: Holding, twdToUsd: number) {
   if (holding.asset_type === "cash") {
     return holding.symbol.toUpperCase() === "TWD" ? twdToUsd : 1;
   }
-  return holding.cost_currency === "TWD" ? holding.average_cost * twdToUsd : holding.average_cost;
+  return currencyAmountToUsd(holding.average_cost, holding.cost_currency, twdToUsd);
 }
 
 export type CurrencyBuckets = Record<Currency, number>;
@@ -166,22 +171,74 @@ export function isSameMonth(dateValue: string) {
 }
 
 export function emptyCurrencyBuckets(): CurrencyBuckets {
-  return { USD: 0, TWD: 0 };
+  return supportedCurrencies.reduce((acc, currency) => {
+    acc[currency] = 0;
+    return acc;
+  }, {} as CurrencyBuckets);
 }
 
 export function currencyBucketTotal(values: CurrencyBuckets) {
   return Object.values(values).reduce((sum, value) => sum + value, 0);
 }
 
-export function currencyAmountToUsd(value: number, currency: Currency, twdToUsd: number) {
-  return currency === "TWD" ? value * twdToUsd : value;
+export function currencyAmountToUsd(value: number, currency: Currency, fxInput: CurrencyFxInput) {
+  const fallback = {
+    twdToUsd: 1 / 32,
+    eurToUsd: 1 / 0.92,
+    jpyToUsd: 1 / 157,
+    krwToUsd: 1 / 1380,
+  };
+  const fx = typeof fxInput === "number"
+    ? { ...fallback, twdToUsd: fxInput }
+    : { ...fallback, ...fxInput };
+
+  if (currency === "TWD") return value * fx.twdToUsd;
+  if (currency === "EUR") return value * fx.eurToUsd;
+  if (currency === "JPY") return value * fx.jpyToUsd;
+  if (currency === "KRW") return value * fx.krwToUsd;
+  return value;
 }
 
-export function currencyBucketsToUsd(values: CurrencyBuckets, twdToUsd: number) {
+export function currencyBucketsToUsd(values: CurrencyBuckets, fxInput: CurrencyFxInput) {
   return (Object.entries(values) as Array<[Currency, number]>).reduce(
-    (sum, [currency, value]) => sum + currencyAmountToUsd(value, currency, twdToUsd),
+    (sum, [currency, value]) => sum + currencyAmountToUsd(value, currency, fxInput),
     0,
   );
+}
+
+export const currencySymbols: Record<Currency, string> = {
+  USD: "$",
+  TWD: "NT$",
+  EUR: "€",
+  JPY: "¥",
+  KRW: "₩",
+};
+
+export function usdToCurrency(valueUsd: number, currency: Currency, fxInput: CurrencyFxInput) {
+  const fallback = {
+    usdToTwd: 32,
+    usdToEur: 0.92,
+    usdToJpy: 157,
+    usdToKrw: 1380,
+  };
+  const fx = typeof fxInput === "number"
+    ? { ...fallback, usdToTwd: fxInput > 0 ? 1 / fxInput : fallback.usdToTwd }
+    : { ...fallback, ...fxInput };
+
+  if (currency === "TWD") return valueUsd * fx.usdToTwd;
+  if (currency === "EUR") return valueUsd * fx.usdToEur;
+  if (currency === "JPY") return valueUsd * fx.usdToJpy;
+  if (currency === "KRW") return valueUsd * fx.usdToKrw;
+  return valueUsd;
+}
+
+export function formatUsdIn(valueUsd: number, displayCurrency: Currency, fxInput: CurrencyFxInput) {
+  return formatCurrency(usdToCurrency(valueUsd, displayCurrency, fxInput), displayCurrency);
+}
+
+export function convertAmount(value: number, fromCurrency: Currency, displayCurrency: Currency, fxInput: CurrencyFxInput) {
+  if (fromCurrency === displayCurrency) return value;
+  return usdToCurrency(currencyAmountToUsd(value, fromCurrency, fxInput), displayCurrency, fxInput);
 }
 
 export function getMonthlyCashflowOverview(

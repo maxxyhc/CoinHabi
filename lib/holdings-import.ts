@@ -102,6 +102,9 @@ export function parseCurrency(raw: string, assetType: AssetType): Currency {
   const value = normalizeHeader(raw);
   if (["usd", "us", "美元", "美金", "dollar", "usdollar"].includes(value)) return "USD";
   if (["twd", "ntd", "nt", "台幣", "新台幣", "元"].includes(value)) return "TWD";
+  if (["eur", "euro", "歐元", "欧元", "ユーロ", "유로"].includes(value)) return "EUR";
+  if (["jpy", "yen", "日圓", "日元", "円", "엔"].includes(value)) return "JPY";
+  if (["krw", "won", "韓元", "韩元", "ウォン", "원"].includes(value)) return "KRW";
   return assetType === "tw_stock" ? "TWD" : "USD";
 }
 

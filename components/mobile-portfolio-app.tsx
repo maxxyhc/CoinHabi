@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   ChevronLeft,
@@ -25,19 +25,26 @@ import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { WalletTracker } from "@/components/wallet-tracker";
 import { localeNames, localeOrder, tx } from "@/lib/i18n";
+import { supportedCurrencies } from "@/lib/types";
 import {
   aggregateHoldingsForOverview,
   buildFinancialHealthNotes,
   buildHealthQuests,
+  convertAmount,
   currencyAmountToUsd,
   currencyBucketsToUsd,
+  currencySymbols,
+  emptyCurrencyBuckets,
   formatCurrency,
+  formatUsdIn,
+  usdToCurrency,
   formatHealthRatio,
   formatPercent,
   getFinancialHealthScore,
   getMonthlyCashflowOverview,
   getPortfolioTotals,
   isSameMonth,
+  type CurrencyFxInput,
 } from "@/lib/calculations";
 import type {
   AssetType,
@@ -55,6 +62,24 @@ import type {
   RecurringExpense,
   RecurringExpenseInput,
 } from "@/lib/types";
+
+type MoneyFmt = {
+  displayCurrency: Currency;
+  fx: CurrencyFxInput;
+  fmtUsd: (valueUsd: number) => string;
+  fmtAmount: (value: number, from: Currency) => string;
+};
+
+const MoneyContext = createContext<MoneyFmt>({
+  displayCurrency: "USD",
+  fx: 1 / 32,
+  fmtUsd: (valueUsd) => formatCurrency(valueUsd),
+  fmtAmount: (value, from) => formatCurrency(value, from),
+});
+
+function useMoney() {
+  return useContext(MoneyContext);
+}
 
 type MobileTab = "home" | "holdings" | "cashflow" | "insights" | "more";
 
@@ -75,10 +100,12 @@ type MobilePortfolioAppProps = {
   refreshedAt?: string;
   refreshing: boolean;
   transactions: CashflowTransaction[];
-  twdToUsd: number;
+  displayCurrency: Currency;
+  fx: CurrencyFxInput;
   userEmail: string;
   userId: string;
   onDeleteHolding: (id: string) => void;
+  onDisplayCurrencyChange: (currency: Currency) => void;
   onHoldingsChanged: () => Promise<void>;
   onLocaleChange: (locale: Locale) => void;
   onPortfolioNameChange: (name: string) => void;
@@ -147,10 +174,18 @@ export function MobilePortfolioApp(props: MobilePortfolioAppProps) {
     refreshedAt,
     refreshing,
     transactions,
-    twdToUsd,
+    displayCurrency,
+    fx,
     userEmail,
     userId,
   } = props;
+  const money = useMemo<MoneyFmt>(() => ({
+    displayCurrency,
+    fx,
+    fmtUsd: (valueUsd: number) => formatUsdIn(valueUsd, displayCurrency, fx),
+    fmtAmount: (value: number, from: Currency) =>
+      formatCurrency(convertAmount(value, from, displayCurrency, fx), displayCurrency),
+  }), [displayCurrency, fx]);
   const [tab, setTab] = useState<MobileTab>("home");
   const [holdingSheet, setHoldingSheet] = useState(false);
   const [cashflowSheet, setCashflowSheet] = useState(false);
@@ -173,6 +208,7 @@ export function MobilePortfolioApp(props: MobilePortfolioAppProps) {
   }
 
   return (
+    <MoneyContext.Provider value={money}>
     <main className="mobile-app min-h-[100dvh] bg-[var(--page)] pb-[calc(5.75rem+env(safe-area-inset-bottom))]">
       <MobileHeader
         locale={locale}
@@ -256,16 +292,18 @@ export function MobilePortfolioApp(props: MobilePortfolioAppProps) {
             recurringExpenses={recurringExpenses}
             totals={totals}
             transactions={transactions}
-            twdToUsd={twdToUsd}
+            fx={fx}
           />
         )}
 
         {tab === "more" && (
           <MobileMore
             demo={demo}
+            displayCurrency={displayCurrency}
             locale={locale}
             portfolioName={portfolioName}
             userEmail={userEmail}
+            onDisplayCurrencyChange={props.onDisplayCurrencyChange}
             onEditName={() => setNameSheet(true)}
             onLocaleChange={props.onLocaleChange}
             onSignOut={props.onSignOut}
@@ -331,6 +369,7 @@ export function MobilePortfolioApp(props: MobilePortfolioAppProps) {
         />
       )}
     </main>
+    </MoneyContext.Provider>
   );
 }
 
@@ -439,6 +478,7 @@ function MobileHome({
   onAddHolding: () => void;
   onOpenHoldings: () => void;
 }) {
+  const money = useMoney();
   const monthly = getTransactionBuckets(monthTransactions);
   const topHoldings = [...overview]
     .sort((a, b) => b.valueUsd - a.valueUsd)
@@ -461,7 +501,7 @@ function MobileHome({
             </span>
           </div>
           <p className="mt-2 text-[2.5rem] font-semibold leading-none tracking-[-0.045em] text-ink">
-            {formatCurrency(totals.totalValue)}
+            {money.fmtUsd(totals.totalValue)}
           </p>
           <div className="mt-3.5 flex items-center gap-2">
             <span
@@ -471,7 +511,7 @@ function MobileHome({
               )}
             >
               {dayPositive ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
-              {formatCurrency(totals.dayChange)} · {formatPercent(totals.dayChangePercent)}
+              {money.fmtUsd(totals.dayChange)} · {formatPercent(totals.dayChangePercent)}
             </span>
             <span className="text-[11px] text-titanium">{tx(locale, "today")}</span>
           </div>
@@ -517,13 +557,13 @@ function MobileHome({
           icon={totals.totalGain >= 0 ? <TrendingUp size={15} /> : <TrendingDown size={15} />}
           label={tx(locale, "Unrealized P/L")}
           tone={totals.totalGain >= 0 ? "positive" : "negative"}
-          value={formatCurrency(totals.totalGain)}
+          value={money.fmtUsd(totals.totalGain)}
         />
         <MobileMetric
           icon={<ReceiptText size={15} />}
           label={tx(locale, "Monthly spending")}
           tone="negative"
-          value={formatBuckets(monthly.expense)}
+          value={formatBuckets(money, monthly.expense)}
         />
       </div>
 
@@ -575,6 +615,7 @@ function MobileHoldings({
   onAdd: () => void;
   onDelete: (id: string) => void;
 }) {
+  const money = useMoney();
   const [sort, setSort] = useState<"value" | "day" | "return">("value");
   const totalValue = holdings.reduce((sum, holding) => sum + holding.valueUsd, 0);
   const sorters: Record<typeof sort, (a: EnrichedHolding, b: EnrichedHolding) => number> = {
@@ -641,7 +682,7 @@ function MobileHoldings({
                 <span className="text-[10px] text-titanium">{group.items.length}</span>
               </span>
               <span className="text-[11px] text-titanium">
-                {formatCurrency(subtotal)} · {totalValue ? ((subtotal / totalValue) * 100).toFixed(1) : "0.0"}%
+                {money.fmtUsd(subtotal)} · {totalValue ? ((subtotal / totalValue) * 100).toFixed(1) : "0.0"}%
               </span>
             </div>
             <div className="space-y-3">
@@ -658,7 +699,7 @@ function MobileHoldings({
                         </div>
                       </div>
                       <div className="shrink-0 text-right">
-                        <p className="font-semibold text-ink">{formatCurrency(holding.valueUsd)}</p>
+                        <p className="font-semibold text-ink">{money.fmtUsd(holding.valueUsd)}</p>
                         <p className={clsx("mt-0.5 text-xs", holding.cost_known === false ? "text-titanium" : holding.gainUsd >= 0 ? "text-mint" : "text-rose")}>
                           {holding.cost_known === false ? "N/A" : formatPercent(holding.gainPercent)}
                         </p>
@@ -677,7 +718,7 @@ function MobileHoldings({
                     </div>
                     <div className="mt-4 grid grid-cols-3 gap-2 rounded-2xl bg-[var(--surface-muted)] p-3 text-xs">
                       <AssetFact label={tx(locale, "Quantity")} value={formatQuantity(holding.quantity)} />
-                      <AssetFact label={tx(locale, "Avg. cost")} value={holding.cost_known === false ? "N/A" : formatCurrency(holding.average_cost, holding.cost_currency)} />
+                      <AssetFact label={tx(locale, "Avg. cost")} value={holding.cost_known === false ? "N/A" : money.fmtAmount(holding.average_cost, holding.cost_currency)} />
                       <AssetFact label={tx(locale, "Weight")} value={`${holding.allocationPercent.toFixed(1)}%`} />
                     </div>
                     {!demo && holding.source_kind !== "wallet" && !holding.id.startsWith("overview:") && (
@@ -717,6 +758,7 @@ function MobileCashflow({
   onAddDebt: () => void;
   onAddRecurring: () => void;
 }) {
+  const money = useMoney();
   const zh = locale === "zh";
   const [section, setSection] = useState<"transactions" | "recurring" | "debts">("transactions");
   const todayKey = localDateKey(new Date());
@@ -746,12 +788,12 @@ function MobileCashflow({
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
-        <MobileMetric icon={<TrendingUp size={18} />} label={tx(locale, "Monthly income")} tone="positive" value={formatBuckets(buckets.income)} />
+        <MobileMetric icon={<TrendingUp size={18} />} label={tx(locale, "Monthly income")} tone="positive" value={formatBuckets(money, buckets.income)} />
         <MobileMetric
           icon={<TrendingDown size={18} />}
           label={tx(locale, "Monthly expenses")}
           tone="negative"
-          value={formatBuckets(buckets.expense)}
+          value={formatBuckets(money, buckets.expense)}
           onClick={() => setExpenseHistoryOpen(true)}
         />
       </div>
@@ -817,7 +859,7 @@ function MobileCashflow({
                       {expense.frequency === "monthly" ? (tx(locale, "Monthly")) : (tx(locale, "Yearly"))}
                     </p>
                   </div>
-                  <p className="shrink-0 font-semibold text-ink">{formatCurrency(expense.amount, expense.currency)}</p>
+                  <p className="shrink-0 font-semibold text-ink">{money.fmtAmount(expense.amount, expense.currency)}</p>
                 </div>
                 <div className="mt-4 flex items-center justify-between rounded-2xl bg-[var(--surface-muted)] px-3 py-2.5 text-xs">
                   <span className={expense.is_active ? "text-mint" : "text-titanium"}>
@@ -848,12 +890,12 @@ function MobileCashflow({
                     <p className="mt-1 text-xs text-titanium">{debt.lender || debtTypeLabel(debt.debt_type, locale)}</p>
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className="font-semibold text-ink">{formatCurrency(debt.remaining_principal, debt.currency)}</p>
+                    <p className="font-semibold text-ink">{money.fmtAmount(debt.remaining_principal, debt.currency)}</p>
                     <p className="mt-1 text-xs text-titanium">{debt.interest_rate.toFixed(2)}% APR</p>
                   </div>
                 </div>
                 <div className="mt-4 grid grid-cols-2 gap-2 rounded-2xl bg-[var(--surface-muted)] p-3 text-xs">
-                  <AssetFact label={tx(locale, "Minimum")} value={formatCurrency(debt.minimum_payment, debt.currency)} />
+                  <AssetFact label={tx(locale, "Minimum")} value={money.fmtAmount(debt.minimum_payment, debt.currency)} />
                   <AssetFact label={tx(locale, "Next payment")} value={formatDate(debt.next_payment_date, locale)} />
                 </div>
               </article>
@@ -874,7 +916,7 @@ function MobileCashflow({
                   year: "numeric",
                 })}
               </p>
-              <p className="mt-1 text-2xl font-semibold tracking-[-0.04em] text-rose">{formatBuckets(buckets.expense)}</p>
+              <p className="mt-1 text-2xl font-semibold tracking-[-0.04em] text-rose">{formatBuckets(money, buckets.expense)}</p>
             </div>
             <span className="rounded-full bg-[var(--surface-raised)] px-3 py-1.5 text-xs font-medium text-titanium">
               {zh ? `共 ${currentMonthExpenses.length} 筆` : `${currentMonthExpenses.length} records`}
@@ -902,7 +944,7 @@ function MobileCashflow({
                       {transaction.notes && <p className="mt-1 line-clamp-2 text-xs text-titanium">{transaction.notes}</p>}
                     </div>
                   </div>
-                  <p className="shrink-0 text-sm font-semibold text-rose">-{formatCurrency(transaction.amount, transaction.currency)}</p>
+                  <p className="shrink-0 text-sm font-semibold text-rose">-{money.fmtAmount(transaction.amount, transaction.currency)}</p>
                 </article>
               ))}
             </div>
@@ -934,6 +976,7 @@ function MobileCashflowCalendar({
   onChangeMonth: (offset: number) => void;
   onSelectDate: (date: string) => void;
 }) {
+  const money = useMoney();
   const zh = locale === "zh";
   const todayKey = localDateKey(new Date());
   const days = mobileCalendarDays(calendarMonth);
@@ -1000,7 +1043,7 @@ function MobileCashflowCalendar({
             ...(schedules?.recurring.map((expense) => ({ amount: expense.amount, currency: expense.currency })) ?? []),
             ...(schedules?.debts.map((debt) => ({ amount: debt.minimum_payment, currency: debt.currency })) ?? []),
           ];
-          const dueLabel = dueEntries.length ? formatDueLabel(dueEntries, zh) : null;
+          const dueLabel = dueEntries.length ? formatDueLabel(dueEntries, money) : null;
           const currentMonth = day.getMonth() === calendarMonth.getMonth();
           const selected = key === selectedDate;
           const today = key === todayKey;
@@ -1081,7 +1124,7 @@ function MobileCashflowCalendar({
                     {expense.is_subscription ? (tx(locale, "Subscription")) : (tx(locale, "Recurring bill"))}
                   </p>
                 </div>
-                <p className="shrink-0 text-xs font-bold text-[var(--accent)]">{formatCurrency(expense.amount, expense.currency)}</p>
+                <p className="shrink-0 text-xs font-bold text-[var(--accent)]">{money.fmtAmount(expense.amount, expense.currency)}</p>
               </div>
             ))}
             {selectedSchedules.debts.map((debt) => (
@@ -1090,7 +1133,7 @@ function MobileCashflowCalendar({
                   <p className="truncate text-xs font-semibold text-ink">{debt.name}</p>
                   <p className="mt-0.5 text-[10px] text-titanium">{tx(locale, "Loan or debt payment")}</p>
                 </div>
-                <p className="shrink-0 text-xs font-bold text-ink">{formatCurrency(debt.minimum_payment, debt.currency)}</p>
+                <p className="shrink-0 text-xs font-bold text-ink">{money.fmtAmount(debt.minimum_payment, debt.currency)}</p>
               </div>
             ))}
           </div>
@@ -1108,7 +1151,7 @@ function MobileCashflowCalendar({
                   <p className="mt-0.5 text-[10px] text-titanium">{transaction.category}</p>
                 </div>
                 <p className={clsx("shrink-0 text-sm font-semibold", transaction.transaction_type === "income" ? "text-mint" : "text-rose")}>
-                  {transaction.transaction_type === "income" ? "+" : "-"}{formatCurrency(transaction.amount, transaction.currency)}
+                  {transaction.transaction_type === "income" ? "+" : "-"}{money.fmtAmount(transaction.amount, transaction.currency)}
                 </p>
               </div>
             ))}
@@ -1128,7 +1171,7 @@ function MobileInsights({
   recurringExpenses,
   totals,
   transactions,
-  twdToUsd,
+  fx,
 }: {
   budgets: MonthlyBudget[];
   debts: Debt[];
@@ -1138,8 +1181,9 @@ function MobileInsights({
   recurringExpenses: RecurringExpense[];
   totals: ReturnType<typeof getPortfolioTotals>;
   transactions: CashflowTransaction[];
-  twdToUsd: number;
+  fx: CurrencyFxInput;
 }) {
+  const money = useMoney();
   const zh = locale === "zh";
   const sorted = [...holdings].sort((a, b) => b.allocationPercent - a.allocationPercent);
   const activeRecurring = recurringExpenses.filter((expense) => expense.is_active);
@@ -1149,7 +1193,7 @@ function MobileInsights({
       currencyAmountToUsd(
         expense.frequency === "monthly" ? expense.amount * 12 : expense.amount,
         expense.currency,
-        twdToUsd,
+        fx,
       ),
     0,
   );
@@ -1170,10 +1214,10 @@ function MobileInsights({
 
   const debtPrincipalUsd = debts
     .filter((debt) => debt.is_active)
-    .reduce((sum, debt) => sum + currencyAmountToUsd(debt.remaining_principal, debt.currency, twdToUsd), 0);
+    .reduce((sum, debt) => sum + currencyAmountToUsd(debt.remaining_principal, debt.currency, fx), 0);
   const netWorthUsd = totals.totalValue - debtPrincipalUsd;
 
-  const expenseDonut = buildExpenseCategoryDonut(transactions, twdToUsd, locale);
+  const expenseDonut = buildExpenseCategoryDonut(transactions, fx, locale);
   const expenseTotal = expenseDonut.reduce((sum, entry) => sum + entry.value, 0);
 
   return (
@@ -1186,7 +1230,7 @@ function MobileInsights({
         recurringExpenses={recurringExpenses}
         totals={totals}
         transactions={transactions}
-        twdToUsd={twdToUsd}
+        fx={fx}
       />
 
       <section className="relative overflow-hidden rounded-[26px] border border-line bg-[var(--surface-raised)] p-5 shadow-[var(--shadow-soft)]">
@@ -1199,16 +1243,16 @@ function MobileInsights({
             </span>
           </div>
           <p className={clsx("mt-2 text-[2.5rem] font-semibold leading-none tracking-[-0.045em]", netWorthUsd >= 0 ? "text-ink" : "text-rose")}>
-            {formatCurrency(netWorthUsd)}
+            {money.fmtUsd(netWorthUsd)}
           </p>
           <div className="mt-4 grid grid-cols-2 gap-2.5">
             <div className="rounded-2xl bg-[var(--surface-muted)] p-3">
               <p className="text-[10px] font-medium text-titanium">{tx(locale, "Total assets")}</p>
-              <p className="mt-1 truncate text-sm font-semibold text-ink">{formatCurrency(totals.totalValue)}</p>
+              <p className="mt-1 truncate text-sm font-semibold text-ink">{money.fmtUsd(totals.totalValue)}</p>
             </div>
             <div className="rounded-2xl bg-[var(--surface-muted)] p-3">
               <p className="text-[10px] font-medium text-titanium">{tx(locale, "Total debt")}</p>
-              <p className="mt-1 truncate text-sm font-semibold text-ink">{debtPrincipalUsd > 0 ? `-${formatCurrency(debtPrincipalUsd)}` : formatCurrency(0)}</p>
+              <p className="mt-1 truncate text-sm font-semibold text-ink">{debtPrincipalUsd > 0 ? `-${money.fmtUsd(debtPrincipalUsd)}` : money.fmtUsd(0)}</p>
             </div>
           </div>
         </div>
@@ -1302,7 +1346,7 @@ function MobileInsights({
             </ResponsiveContainer>
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
               <p className="text-[10px] text-titanium">{tx(locale, "This month")}</p>
-              <p className="text-lg font-semibold tracking-[-0.03em] text-ink">{formatCurrency(expenseTotal)}</p>
+              <p className="text-lg font-semibold tracking-[-0.03em] text-ink">{money.fmtUsd(expenseTotal)}</p>
             </div>
           </div>
           <div className="mt-2 space-y-1">
@@ -1313,7 +1357,7 @@ function MobileInsights({
                   <span className="truncate text-xs font-medium text-ink">{entry.name}</span>
                 </span>
                 <span className="flex shrink-0 items-center gap-2">
-                  <span className="text-xs tabular-nums text-titanium">{formatCurrency(entry.value)}</span>
+                  <span className="text-xs tabular-nums text-titanium">{money.fmtUsd(entry.value)}</span>
                   <span className="w-11 text-right text-xs tabular-nums text-titanium">
                     {expenseTotal ? ((entry.value / expenseTotal) * 100).toFixed(0) : "0"}%
                   </span>
@@ -1328,11 +1372,11 @@ function MobileInsights({
         <section className="relative overflow-hidden rounded-[24px] border border-line bg-[var(--surface-raised)] p-4 shadow-[var(--shadow-soft)]">
           <div className="pointer-events-none absolute -right-12 -top-16 h-36 w-36 rounded-full bg-[var(--accent)] opacity-[0.1] blur-3xl" />
           <p className="text-[11px] font-medium text-titanium">{tx(locale, "Annual recurring cost")}</p>
-          <p className="mt-1.5 text-2xl font-semibold tracking-[-0.04em] text-ink">{formatCurrency(annualRecurringUsd)}</p>
+          <p className="mt-1.5 text-2xl font-semibold tracking-[-0.04em] text-ink">{money.fmtUsd(annualRecurringUsd)}</p>
           <p className="mt-1 text-xs text-titanium">
             {zh
-              ? `約每月 ${formatCurrency(annualRecurringUsd / 12)} · ${activeRecurring.length} 個項目`
-              : `≈ ${formatCurrency(annualRecurringUsd / 12)} per month · ${activeRecurring.length} items`}
+              ? `約每月 ${money.fmtUsd(annualRecurringUsd / 12)} · ${activeRecurring.length} 個項目`
+              : `≈ ${money.fmtUsd(annualRecurringUsd / 12)} per month · ${activeRecurring.length} items`}
           </p>
         </section>
       )}
@@ -1355,7 +1399,7 @@ function MobileHealthSection({
   recurringExpenses,
   totals,
   transactions,
-  twdToUsd,
+  fx,
 }: {
   budgets: MonthlyBudget[];
   debts: Debt[];
@@ -1364,8 +1408,9 @@ function MobileHealthSection({
   recurringExpenses: RecurringExpense[];
   totals: ReturnType<typeof getPortfolioTotals>;
   transactions: CashflowTransaction[];
-  twdToUsd: number;
+  fx: CurrencyFxInput;
 }) {
+  const money = useMoney();
   const zh = locale === "zh";
   const monthTransactions = transactions.filter((transaction) => isSameMonth(transaction.transaction_date));
   const activeRecurring = recurringExpenses.filter((expense) => expense.is_active);
@@ -1375,13 +1420,13 @@ function MobileHealthSection({
   const overBudgetCount = budgets
     .filter((budget) => budget.month.slice(0, 7) === currentMonthKey)
     .filter((budget) => {
-      const spent = monthTransactions
-        .filter(
-          (transaction) =>
-            transaction.transaction_type === "expense" &&
-            transaction.category === budget.category &&
-            transaction.currency === budget.currency,
-        )
+          const spent = monthTransactions
+            .filter(
+              (transaction) =>
+                transaction.transaction_type === "expense" &&
+                (budget.category === "total" || transaction.category === budget.category) &&
+                transaction.currency === budget.currency,
+            )
         .reduce((sum, transaction) => sum + transaction.amount, 0);
       return spent > budget.amount;
     }).length;
@@ -1394,12 +1439,12 @@ function MobileHealthSection({
   const missingPriceCount = enriched.filter((holding) => holding.asset_type !== "cash" && !holding.quote).length;
   const dataIssues = unknownCostCount + missingPriceCount;
 
-  const incomeUsd = currencyBucketsToUsd(overview.income, twdToUsd);
-  const fixedUsd = currencyBucketsToUsd(overview.recurring, twdToUsd) + currencyBucketsToUsd(overview.debtPayments, twdToUsd);
-  const leftoverUsd = currencyBucketsToUsd(overview.leftover, twdToUsd);
-  const debtPaymentUsd = currencyBucketsToUsd(overview.debtPayments, twdToUsd);
+  const incomeUsd = currencyBucketsToUsd(overview.income, fx);
+  const fixedUsd = currencyBucketsToUsd(overview.recurring, fx) + currencyBucketsToUsd(overview.debtPayments, fx);
+  const leftoverUsd = currencyBucketsToUsd(overview.leftover, fx);
+  const debtPaymentUsd = currencyBucketsToUsd(overview.debtPayments, fx);
   const debtPrincipalUsd = activeDebts.reduce(
-    (sum, debt) => sum + currencyAmountToUsd(debt.remaining_principal, debt.currency, twdToUsd),
+    (sum, debt) => sum + currencyAmountToUsd(debt.remaining_principal, debt.currency, fx),
     0,
   );
   const netWorthUsd = totals.totalValue - debtPrincipalUsd;
@@ -1543,7 +1588,7 @@ function MobileHealthSection({
             <HealthStat
               label={tx(locale, "Net worth")}
               status={netWorthUsd >= 0 ? "good" : "bad"}
-              value={formatCurrency(netWorthUsd)}
+              value={money.fmtUsd(netWorthUsd)}
             />
             <HealthStat
               label={tx(locale, "Savings rate")}
@@ -1687,7 +1732,7 @@ function HealthPet({ mood }: { mood: PetMood }) {
   );
 }
 
-function buildExpenseCategoryDonut(transactions: CashflowTransaction[], twdToUsd: number, locale: Locale) {
+function buildExpenseCategoryDonut(transactions: CashflowTransaction[], fx: CurrencyFxInput, locale: Locale) {
   const zh = locale === "zh";
   const monthKey = new Date().toISOString().slice(0, 7);
   const categoryLabel = (id: string) => {
@@ -1701,7 +1746,7 @@ function buildExpenseCategoryDonut(transactions: CashflowTransaction[], twdToUsd
     .filter((transaction) => transaction.transaction_type === "expense" && transaction.transaction_date.slice(0, 7) === monthKey)
     .forEach((transaction) => {
       const label = categoryLabel(transaction.category);
-      const amount = currencyAmountToUsd(transaction.amount, transaction.currency, twdToUsd);
+      const amount = currencyAmountToUsd(transaction.amount, transaction.currency, fx);
       totals.set(label, (totals.get(label) ?? 0) + amount);
     });
 
@@ -1725,17 +1770,21 @@ function buildExpenseCategoryDonut(transactions: CashflowTransaction[], twdToUsd
 
 function MobileMore({
   demo,
+  displayCurrency,
   locale,
   portfolioName,
   userEmail,
+  onDisplayCurrencyChange,
   onEditName,
   onLocaleChange,
   onSignOut,
 }: {
   demo: boolean;
+  displayCurrency: Currency;
   locale: Locale;
   portfolioName: string;
   userEmail: string;
+  onDisplayCurrencyChange: (currency: Currency) => void;
   onEditName: () => void;
   onLocaleChange: (locale: Locale) => void;
   onSignOut: () => void;
@@ -1755,6 +1804,18 @@ function MobileMore({
             {portfolioName ? (zh ? `${portfolioName}的資產` : `${portfolioName}'s assets`) : (tx(locale, "Not set"))}
             <Pencil className="text-titanium" size={12} />
           </button>
+        </div>
+        <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-4">
+          <span className="text-sm text-titanium">{tx(locale, "Currency")}</span>
+          <select
+            className="input-control focus-ring min-h-10 rounded-full px-3 text-sm font-semibold text-ink"
+            value={displayCurrency}
+            onChange={(event) => onDisplayCurrencyChange(event.target.value as Currency)}
+          >
+            {supportedCurrencies.map((item) => (
+              <option key={item} value={item}>{item}（{currencySymbols[item]}）</option>
+            ))}
+          </select>
         </div>
         <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-4">
           <span className="text-sm text-titanium">{tx(locale, "Theme")}</span>
@@ -1868,8 +1929,9 @@ function MobileHoldingSheet({
           </MobileField>
           <MobileField label={tx(locale, "Currency")}>
             <select className="input-control w-full px-3" value={form.cost_currency} onChange={(event) => onUpdate("cost_currency", event.target.value as Currency)}>
-              <option value="USD">USD</option>
-              <option value="TWD">TWD</option>
+              {supportedCurrencies.map((currency) => (
+                <option key={currency} value={currency}>{currency}</option>
+              ))}
             </select>
           </MobileField>
         </div>
@@ -1941,8 +2003,9 @@ function MobileCashflowSheet({
           </MobileField>
           <MobileField label={tx(locale, "Currency")}>
             <select className="input-control w-full px-3" value={form.currency} onChange={(event) => onUpdate("currency", event.target.value as Currency)}>
-              <option value="USD">USD</option>
-              <option value="TWD">TWD</option>
+              {supportedCurrencies.map((currency) => (
+                <option key={currency} value={currency}>{currency}</option>
+              ))}
             </select>
           </MobileField>
         </div>
@@ -2004,8 +2067,9 @@ function MobileRecurringSheet({
           </MobileField>
           <MobileField label={tx(locale, "Currency")}>
             <select className="input-control w-full px-3" value={form.currency} onChange={(event) => onUpdate("currency", event.target.value as Currency)}>
-              <option value="USD">USD</option>
-              <option value="TWD">TWD</option>
+              {supportedCurrencies.map((currency) => (
+                <option key={currency} value={currency}>{currency}</option>
+              ))}
             </select>
           </MobileField>
         </div>
@@ -2083,8 +2147,9 @@ function MobileDebtSheet({
           </MobileField>
           <MobileField label={tx(locale, "Currency")}>
             <select className="input-control w-full px-3" value={form.currency} onChange={(event) => onUpdate("currency", event.target.value as Currency)}>
-              <option value="USD">USD</option>
-              <option value="TWD">TWD</option>
+              {supportedCurrencies.map((currency) => (
+                <option key={currency} value={currency}>{currency}</option>
+              ))}
             </select>
           </MobileField>
         </div>
@@ -2300,6 +2365,7 @@ function QuickAction({
 }
 
 function MobileAssetRow({ holding, locale }: { holding: EnrichedHolding; locale: Locale }) {
+  const money = useMoney();
   return (
     <div className="flex items-center justify-between gap-3 py-3">
       <div className="flex min-w-0 items-center gap-3">
@@ -2310,7 +2376,7 @@ function MobileAssetRow({ holding, locale }: { holding: EnrichedHolding; locale:
         </div>
       </div>
       <div className="shrink-0 text-right">
-        <p className="text-sm font-semibold text-ink">{formatCurrency(holding.valueUsd)}</p>
+        <p className="text-sm font-semibold text-ink">{money.fmtUsd(holding.valueUsd)}</p>
         <p className={clsx("mt-0.5 text-xs font-medium", holding.cost_known === false ? "text-titanium" : holding.gainUsd >= 0 ? "text-mint" : "text-rose")}>
           {holding.cost_known === false ? (tx(locale, "Unknown cost")) : formatPercent(holding.gainPercent)}
         </p>
@@ -2448,8 +2514,8 @@ function debtTypeLabel(type: DebtType, locale: Locale) {
 
 function getTransactionBuckets(transactions: CashflowTransaction[]) {
   const result = {
-    income: { USD: 0, TWD: 0 },
-    expense: { USD: 0, TWD: 0 },
+    income: emptyCurrencyBuckets(),
+    expense: emptyCurrencyBuckets(),
   };
   transactions.forEach((transaction) => {
     result[transaction.transaction_type][transaction.currency] += transaction.amount;
@@ -2457,11 +2523,8 @@ function getTransactionBuckets(transactions: CashflowTransaction[]) {
   return result;
 }
 
-function formatBuckets(values: Record<Currency, number>) {
-  const parts = (["USD", "TWD"] as Currency[])
-    .filter((currency) => values[currency] !== 0)
-    .map((currency) => formatCurrency(values[currency], currency));
-  return parts.length ? parts.join(" / ") : "$0.00";
+function formatBuckets(money: MoneyFmt, values: Record<Currency, number>) {
+  return money.fmtUsd(currencyBucketsToUsd(values, money.fx));
 }
 
 function formatQuantity(value: number) {
@@ -2528,21 +2591,16 @@ function mobileCalendarDays(month: Date) {
   });
 }
 
-function formatDueLabel(entries: Array<{ amount: number; currency: Currency }>, zh: boolean) {
-  const totals: Record<Currency, number> = { USD: 0, TWD: 0 };
-  entries.forEach((entry) => {
-    totals[entry.currency] += entry.amount;
-  });
-  const active = (Object.entries(totals) as Array<[Currency, number]>).filter(([, value]) => value > 0);
-  if (active.length === 1) {
-    const [currency, value] = active[0];
-    return formatCompactAmount(value, currency);
-  }
-  return zh ? `${entries.length} 筆` : `${entries.length} due`;
+function formatDueLabel(entries: Array<{ amount: number; currency: Currency }>, money: MoneyFmt) {
+  const totalUsd = entries.reduce(
+    (sum, entry) => sum + currencyAmountToUsd(entry.amount, entry.currency, money.fx),
+    0,
+  );
+  return formatCompactAmount(usdToCurrency(totalUsd, money.displayCurrency, money.fx), money.displayCurrency);
 }
 
 function formatCompactAmount(value: number, currency: Currency) {
-  const symbol = currency === "TWD" ? "NT$" : "$";
+  const symbol = currencySymbols[currency];
   if (value >= 10000) return `${symbol}${Math.round(value / 1000)}K`;
   if (value >= 1000) return `${symbol}${(value / 1000).toFixed(1)}K`;
   return `${symbol}${Math.round(value)}`;

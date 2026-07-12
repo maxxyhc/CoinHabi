@@ -15,6 +15,7 @@ import {
   type FieldKey,
   type Mapping,
 } from "@/lib/holdings-import";
+import { supportedCurrencies } from "@/lib/types";
 import type { AssetType, Currency, EnrichedHolding, Locale } from "@/lib/types";
 import { tx } from "@/lib/i18n";
 
@@ -373,8 +374,9 @@ export function HoldingsImport({
                             value={candidate.cost_currency}
                             onChange={(event) => updateCandidate(candidate.id, "cost_currency", event.target.value as Currency)}
                           >
-                            <option value="USD">USD</option>
-                            <option value="TWD">TWD</option>
+                            {supportedCurrencies.map((currency) => (
+                              <option key={currency} value={currency}>{currency}</option>
+                            ))}
                           </select>
                         </td>
                         <td className="whitespace-nowrap px-2 py-2">

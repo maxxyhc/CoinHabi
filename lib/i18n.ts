@@ -105,7 +105,7 @@ export const dictionary = {
     us_stock: "US stock",
     tw_stock: "Taiwan stock",
     cash: "Cash",
-    baseCurrencyHelp: "Portfolio totals are normalized to USD. TWD holdings use the latest FX rate.",
+    baseCurrencyHelp: "All amounts across the app are converted into your chosen currency using live FX rates.",
   },
   zh: {
     appName: "Coinhabi",
@@ -171,7 +171,7 @@ export const dictionary = {
     us_stock: "美股",
     tw_stock: "台股",
     cash: "現金",
-    baseCurrencyHelp: "投資組合總額統一換算成 USD。台股與 TWD 現金會使用最新匯率。",
+    baseCurrencyHelp: "全 App 的金額都會以即時匯率換算成你選擇的幣種顯示。",
   },
   ja: {
     appName: "Coinhabi",
@@ -237,7 +237,7 @@ export const dictionary = {
     us_stock: "米国株",
     tw_stock: "台湾株",
     cash: "現金",
-    baseCurrencyHelp: "ポートフォリオ合計はUSDに換算されます。TWD資産は最新の為替レートを使用します。",
+    baseCurrencyHelp: "アプリ内のすべての金額は、最新の為替レートで選択した通貨に換算して表示されます。",
   },
   ko: {
     appName: "Coinhabi",
@@ -303,7 +303,7 @@ export const dictionary = {
     us_stock: "미국 주식",
     tw_stock: "대만 주식",
     cash: "현금",
-    baseCurrencyHelp: "포트폴리오 합계는 USD로 환산됩니다. TWD 자산은 최신 환율을 사용합니다.",
+    baseCurrencyHelp: "앱의 모든 금액은 최신 환율로 선택한 통화로 환산되어 표시됩니다.",
   },
   es: {
     appName: "Coinhabi",
@@ -369,7 +369,7 @@ export const dictionary = {
     us_stock: "Acción EE. UU.",
     tw_stock: "Acción Taiwán",
     cash: "Efectivo",
-    baseCurrencyHelp: "Los totales de la cartera se normalizan a USD. Las posiciones en TWD usan el tipo de cambio más reciente.",
+    baseCurrencyHelp: "Todos los importes de la app se convierten a la moneda elegida con tipos de cambio en vivo.",
   },
 } as const;
 
