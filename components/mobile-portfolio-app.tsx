@@ -1,6 +1,10 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { CashflowFlow } from "./cashflow-flow";
+import { InvestmentCost } from "./investment-cost";
+import { financialCopy } from "./financial-summary-copy";
+
+import { useMemo, useRef, useState } from "react";
 import {
   BarChart3,
   ChevronLeft,
@@ -11,10 +15,11 @@ import {
   Languages,
   LogOut,
   Pencil,
+  MoreHorizontal,
   Plus,
   ReceiptText,
   RefreshCw,
-  Sparkles,
+  Trash2,
   TrendingDown,
   TrendingUp,
   WalletCards,
@@ -22,28 +27,33 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
+import type { PieLabelRenderProps } from "recharts";
+import { BankMark } from "@/components/bank-mark";
+import { GainCalculationModeSelector } from "@/components/gain-calculation-mode-selector";
+import { GainCoverageWarning } from "@/components/gain-coverage-warning";
+import {
+  InvestmentHistoryPanel,
+  InvestmentPerformancePanel,
+  InvestmentSaleModal,
+  getRecordSaleLabel,
+} from "@/components/investment-ledger";
+import { HoldingBubbles } from "@/components/holding-bubbles";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { StockSymbolSearch } from "@/components/stock-symbol-search";
 import { WalletTracker } from "@/components/wallet-tracker";
-import { localeNames, localeOrder, tx } from "@/lib/i18n";
+import { getDictionary, localeNames, localeOrder, tx } from "@/lib/i18n";
+import { MoneyProvider, useMoney } from "@/components/money-context";
+import { createMoney, formatCurrencyBuckets, formatCurrentPrice, type MoneyFmt } from "@/lib/money";
+import { tapLight } from "@/lib/haptics";
 import { supportedCurrencies } from "@/lib/types";
 import {
   aggregateHoldingsForOverview,
-  buildFinancialHealthNotes,
-  buildHealthQuests,
-  convertAmount,
   currencyAmountToUsd,
-  currencyBucketsToUsd,
   currencySymbols,
   emptyCurrencyBuckets,
-  formatCurrency,
-  formatUsdIn,
   usdToCurrency,
-  formatHealthRatio,
   formatPercent,
-  getFinancialHealthScore,
-  getMonthlyCashflowOverview,
   getPortfolioTotals,
-  isSameMonth,
   type CurrencyFxInput,
 } from "@/lib/calculations";
 import type {
@@ -56,32 +66,18 @@ import type {
   DebtInput,
   DebtType,
   EnrichedHolding,
+  Holding,
   HoldingInput,
+  InvestmentPerformance,
+  InvestmentSaleInput,
+  InvestmentTransaction,
   Locale,
   MonthlyBudget,
   RecurringExpense,
   RecurringExpenseInput,
 } from "@/lib/types";
 
-type MoneyFmt = {
-  displayCurrency: Currency;
-  fx: CurrencyFxInput;
-  fmtUsd: (valueUsd: number) => string;
-  fmtAmount: (value: number, from: Currency) => string;
-};
-
-const MoneyContext = createContext<MoneyFmt>({
-  displayCurrency: "USD",
-  fx: 1 / 32,
-  fmtUsd: (valueUsd) => formatCurrency(valueUsd),
-  fmtAmount: (value, from) => formatCurrency(value, from),
-});
-
-function useMoney() {
-  return useContext(MoneyContext);
-}
-
-type MobileTab = "home" | "holdings" | "cashflow" | "insights" | "more";
+type MobileTab = "home" | "holdings" | "bank" | "cashflow" | "insights" | "more";
 
 type MobilePortfolioAppProps = {
   budgets: MonthlyBudget[];
@@ -97,14 +93,34 @@ type MobilePortfolioAppProps = {
   portfolioName: string;
   recurringExpenses: RecurringExpense[];
   recurringForm: RecurringExpenseInput;
+  fxStatus?: React.ReactNode;
   refreshedAt?: string;
   refreshing: boolean;
   transactions: CashflowTransaction[];
+  investmentPerformance: InvestmentPerformance;
+  investmentTransactions: InvestmentTransaction[];
+  biometricAvailable: boolean;
+  biometricLock: boolean;
+  nativePlatform: boolean;
+  paymentReminders: boolean;
   displayCurrency: Currency;
   fx: CurrencyFxInput;
   userEmail: string;
   userId: string;
+  onBiometricLockChange: (next: boolean) => void;
+  onPaymentRemindersChange: (next: boolean) => void;
   onDeleteHolding: (id: string) => void;
+  onEditHolding: (holding: Holding) => void;
+  onSellHolding: (holding: EnrichedHolding) => void;
+  onCloseSale: () => void;
+  onRecordSale: (input: InvestmentSaleInput) => Promise<void>;
+  sellingHolding: EnrichedHolding | null;
+  editingDebt: boolean;
+  editingRecurring: boolean;
+  onDeleteDebt: (id: string) => void;
+  onDeleteRecurring: (id: string) => void;
+  onEditDebt: (debt: Debt) => void;
+  onEditRecurring: (expense: RecurringExpense) => void;
   onDisplayCurrencyChange: (currency: Currency) => void;
   onHoldingsChanged: () => Promise<void>;
   onLocaleChange: (locale: Locale) => void;
@@ -113,11 +129,13 @@ type MobilePortfolioAppProps = {
   onResetCashflow: () => void;
   onResetDebt: () => void;
   onResetHolding: () => void;
+  onResetCashHolding: () => void;
   onResetRecurring: () => void;
   onSaveCashflow: (event: React.FormEvent<HTMLFormElement>) => void;
   onSaveDebt: (event: React.FormEvent<HTMLFormElement>) => void;
   onSaveHolding: (event: React.FormEvent<HTMLFormElement>) => void;
   onSaveRecurring: (event: React.FormEvent<HTMLFormElement>) => void;
+  onDeleteAccount: () => Promise<void>;
   onSignOut: () => void;
   onUpdateCashflow: <K extends keyof CashflowTransactionInput>(
     key: K,
@@ -159,7 +177,6 @@ const incomeCategories = [
 
 export function MobilePortfolioApp(props: MobilePortfolioAppProps) {
   const {
-    budgets,
     cashflowForm,
     debtForm,
     debts,
@@ -174,24 +191,25 @@ export function MobilePortfolioApp(props: MobilePortfolioAppProps) {
     refreshedAt,
     refreshing,
     transactions,
+    investmentPerformance,
+    investmentTransactions,
+    biometricAvailable,
+    biometricLock,
+    nativePlatform,
+    paymentReminders,
     displayCurrency,
     fx,
     userEmail,
     userId,
   } = props;
-  const money = useMemo<MoneyFmt>(() => ({
-    displayCurrency,
-    fx,
-    fmtUsd: (valueUsd: number) => formatUsdIn(valueUsd, displayCurrency, fx),
-    fmtAmount: (value: number, from: Currency) =>
-      formatCurrency(convertAmount(value, from, displayCurrency, fx), displayCurrency),
-  }), [displayCurrency, fx]);
+  const money = useMemo<MoneyFmt>(() => createMoney(displayCurrency, fx), [displayCurrency, fx]);
   const [tab, setTab] = useState<MobileTab>("home");
   const [holdingSheet, setHoldingSheet] = useState(false);
   const [cashflowSheet, setCashflowSheet] = useState(false);
   const [recurringSheet, setRecurringSheet] = useState(false);
   const [debtSheet, setDebtSheet] = useState(false);
   const [nameSheet, setNameSheet] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const overview = useMemo(
     () => aggregateHoldingsForOverview(enriched),
     [enriched],
@@ -203,13 +221,14 @@ export function MobilePortfolioApp(props: MobilePortfolioAppProps) {
   );
 
   function selectTab(next: MobileTab) {
+    tapLight();
     setTab(next);
-    window.scrollTo({ behavior: "smooth", top: 0 });
+    scrollContainerRef.current?.scrollTo({ behavior: "smooth", top: 0 });
   }
 
   return (
-    <MoneyContext.Provider value={money}>
-    <main className="mobile-app min-h-[100dvh] bg-[var(--page)] pb-[calc(5.75rem+env(safe-area-inset-bottom))]">
+    <MoneyProvider money={money}>
+    <main className="mobile-app flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-[var(--page)]">
       <MobileHeader
         locale={locale}
         portfolioName={portfolioName}
@@ -221,7 +240,12 @@ export function MobilePortfolioApp(props: MobilePortfolioAppProps) {
         onRefresh={props.onRefresh}
       />
 
-      <div className="mx-auto max-w-lg px-4 pb-6 pt-4">
+      <div
+        className="mobile-app-scroll min-h-0 w-full flex-1 px-4 pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-4"
+        ref={scrollContainerRef}
+      >
+        <div className="mx-auto max-w-lg">
+        {props.fxStatus}
         {error && (
           <div className="mb-4 rounded-2xl border border-rose/25 bg-rose/10 p-3 text-sm text-rose">
             {error}
@@ -230,6 +254,8 @@ export function MobilePortfolioApp(props: MobilePortfolioAppProps) {
 
         {tab === "home" && (
           <MobileHome
+            costHoldings={enriched}
+            investmentPerformance={investmentPerformance}
             locale={locale}
             monthTransactions={monthTransactions}
             overview={overview}
@@ -249,22 +275,59 @@ export function MobilePortfolioApp(props: MobilePortfolioAppProps) {
         {tab === "holdings" && (
           <MobileHoldings
             demo={demo}
-            holdings={overview}
+            holdings={enriched.filter((holding) => holding.asset_type !== "cash")}
+            investmentTransactions={investmentTransactions}
             locale={locale}
             onAdd={() => {
               props.onResetHolding();
               setHoldingSheet(true);
             }}
             onDelete={props.onDeleteHolding}
+            onEdit={(holding) => {
+              props.onEditHolding(holding);
+              setHoldingSheet(true);
+            }}
+            onSell={props.onSellHolding}
+          />
+        )}
+
+        {tab === "bank" && (
+          <MobileHoldings
+            cashOnly
+            demo={demo}
+            holdings={overview.filter((holding) => holding.asset_type === "cash")}
+            locale={locale}
+            onAdd={() => {
+              props.onResetCashHolding();
+              setHoldingSheet(true);
+            }}
+            onDelete={props.onDeleteHolding}
+            onEdit={(holding) => {
+              props.onEditHolding(holding);
+              setHoldingSheet(true);
+            }}
           />
         )}
 
         {tab === "cashflow" && (
           <MobileCashflow
+            assetValue={totals.totalValue}
+              cashValue={enriched.filter(h => h.asset_type === "cash").reduce((sum, h) => sum + h.valueUsd, 0)}
             debts={debts}
+            demo={demo}
             locale={locale}
             recurringExpenses={recurringExpenses}
             transactions={transactions}
+            onDeleteDebt={props.onDeleteDebt}
+            onDeleteRecurring={props.onDeleteRecurring}
+            onEditDebt={(debt) => {
+              props.onEditDebt(debt);
+              setDebtSheet(true);
+            }}
+            onEditRecurring={(expense) => {
+              props.onEditRecurring(expense);
+              setRecurringSheet(true);
+            }}
             onAdd={(type, date) => {
               props.onResetCashflow();
               props.onUpdateCashflow("transaction_type", type);
@@ -284,9 +347,7 @@ export function MobilePortfolioApp(props: MobilePortfolioAppProps) {
 
         {tab === "insights" && (
           <MobileInsights
-            budgets={budgets}
             debts={debts}
-            enriched={enriched}
             holdings={overview}
             locale={locale}
             recurringExpenses={recurringExpenses}
@@ -298,17 +359,26 @@ export function MobilePortfolioApp(props: MobilePortfolioAppProps) {
 
         {tab === "more" && (
           <MobileMore
+            biometricAvailable={biometricAvailable}
+            biometricLock={biometricLock}
+            nativePlatform={nativePlatform}
+            paymentReminders={paymentReminders}
             demo={demo}
             displayCurrency={displayCurrency}
             locale={locale}
             portfolioName={portfolioName}
             userEmail={userEmail}
+            onBiometricLockChange={props.onBiometricLockChange}
+            onPaymentRemindersChange={props.onPaymentRemindersChange}
             onDisplayCurrencyChange={props.onDisplayCurrencyChange}
             onEditName={() => setNameSheet(true)}
             onLocaleChange={props.onLocaleChange}
+            onOpenBank={() => selectTab("bank")}
+            onDeleteAccount={props.onDeleteAccount}
             onSignOut={props.onSignOut}
           />
         )}
+        </div>
       </div>
 
       <MobileBottomNav active={tab} locale={locale} onSelect={selectTab} />
@@ -316,6 +386,7 @@ export function MobilePortfolioApp(props: MobilePortfolioAppProps) {
       {holdingSheet && (
         <MobileHoldingSheet
           editing={props.editingHolding}
+          cashOnly={tab === "bank"}
           demo={demo}
           form={form}
           locale={locale}
@@ -339,6 +410,7 @@ export function MobilePortfolioApp(props: MobilePortfolioAppProps) {
 
       {recurringSheet && (
         <MobileRecurringSheet
+          editing={props.editingRecurring}
           form={recurringForm}
           locale={locale}
           onClose={() => setRecurringSheet(false)}
@@ -349,6 +421,7 @@ export function MobilePortfolioApp(props: MobilePortfolioAppProps) {
 
       {debtSheet && (
         <MobileDebtSheet
+          editing={props.editingDebt}
           form={debtForm}
           locale={locale}
           onClose={() => setDebtSheet(false)}
@@ -368,8 +441,16 @@ export function MobilePortfolioApp(props: MobilePortfolioAppProps) {
           }}
         />
       )}
+      {props.sellingHolding && (
+        <InvestmentSaleModal
+          holding={props.sellingHolding}
+          locale={locale}
+          onClose={props.onCloseSale}
+          onSubmit={props.onRecordSale}
+        />
+      )}
     </main>
-    </MoneyContext.Provider>
+    </MoneyProvider>
   );
 }
 
@@ -392,17 +473,13 @@ function MobileHeader({
   onLocaleChange: (locale: Locale) => void;
   onRefresh: () => void;
 }) {
-  const zh = locale === "zh";
   const homeTitle = portfolioName
-    ? zh
-      ? `${portfolioName}的資產`
-      : `${portfolioName}'s assets`
-    : zh
-      ? "我的財務"
-      : "My finances";
+    ? portfolioName
+    : tx(locale, "My finances");
   const titles: Record<MobileTab, string> = {
     home: homeTitle,
     holdings: tx(locale, "Holdings"),
+    bank: tx(locale, "Cash"),
     cashflow: tx(locale, "Cashflow"),
     insights: tx(locale, "Insights"),
     more: tx(locale, "More"),
@@ -462,6 +539,8 @@ function MobileHeader({
 }
 
 function MobileHome({
+  costHoldings,
+  investmentPerformance,
   locale,
   monthTransactions,
   overview,
@@ -470,6 +549,8 @@ function MobileHome({
   onAddHolding,
   onOpenHoldings,
 }: {
+  costHoldings: EnrichedHolding[];
+  investmentPerformance: InvestmentPerformance;
   locale: Locale;
   monthTransactions: CashflowTransaction[];
   overview: EnrichedHolding[];
@@ -480,11 +561,16 @@ function MobileHome({
 }) {
   const money = useMoney();
   const monthly = getTransactionBuckets(monthTransactions);
-  const topHoldings = [...overview]
+  const investmentHoldings = overview.filter((holding) => holding.asset_type !== "cash");
+  const topHoldings = [...investmentHoldings]
     .sort((a, b) => b.valueUsd - a.valueUsd)
     .slice(0, 4);
   const allocationSegments = buildAllocationSegments(overview);
   const dayPositive = totals.dayChange >= 0;
+  const gainWarning = getDictionary(locale).gainCoverageWarning
+    .replace("{known}", String(totals.gainKnownCount))
+    .replace("{total}", String(totals.gainInvestmentCount));
+  const showGainWarning = totals.gainInvestmentCount > 0 && !totals.gainDataComplete;
 
   return (
     <div className="space-y-4">
@@ -503,6 +589,7 @@ function MobileHome({
           <p className="mt-2 text-[2.5rem] font-semibold leading-none tracking-[-0.045em] text-ink">
             {money.fmtUsd(totals.totalValue)}
           </p>
+          <InvestmentCost holdings={costHoldings} locale={locale} />
           <div className="mt-3.5 flex items-center gap-2">
             <span
               className={clsx(
@@ -542,7 +629,7 @@ function MobileHome({
             type="button"
           >
             <span className="font-medium text-titanium">
-              {overview.length} {tx(locale, "assets")}
+              {investmentHoldings.length} {tx(locale, "assets")}
             </span>
             <span className="flex items-center gap-0.5">
               {tx(locale, "View holdings")}
@@ -554,18 +641,21 @@ function MobileHome({
 
       <div className="grid grid-cols-2 gap-3">
         <MobileMetric
-          icon={totals.totalGain >= 0 ? <TrendingUp size={15} /> : <TrendingDown size={15} />}
+          icon={totals.hasGainData && totals.totalGain < 0 ? <TrendingDown size={15} /> : <TrendingUp size={15} />}
           label={tx(locale, "Unrealized P/L")}
-          tone={totals.totalGain >= 0 ? "positive" : "negative"}
-          value={money.fmtUsd(totals.totalGain)}
+          tone={totals.hasGainData ? (totals.totalGain >= 0 ? "positive" : "negative") : undefined}
+          value={totals.hasGainData ? money.fmtUsd(totals.totalGain) : "N/A"}
+          warning={showGainWarning ? gainWarning : undefined}
         />
         <MobileMetric
           icon={<ReceiptText size={15} />}
           label={tx(locale, "Monthly spending")}
           tone="negative"
-          value={formatBuckets(money, monthly.expense)}
+          value={formatCurrencyBuckets(money, monthly.expense)}
         />
       </div>
+
+      <InvestmentPerformancePanel compact locale={locale} performance={investmentPerformance} />
 
       <div className="grid grid-cols-2 gap-3">
         <QuickAction
@@ -598,39 +688,156 @@ function MobileHome({
           ))}
         </div>
       </section>
+
+      <MobileAllocationCard holdings={overview} locale={locale} />
     </div>
   );
 }
 
+function MobileAllocationCard({ holdings, locale }: { holdings: EnrichedHolding[]; locale: Locale }) {
+  const sorted = [...holdings].sort((a, b) => b.allocationPercent - a.allocationPercent);
+  const donutData = sorted.slice(0, 5).map((holding, index) => ({
+    color: chartPalette[index % chartPalette.length],
+    name: holding.symbol.replace(/\..*$/, ""),
+    value: Math.max(0, holding.allocationPercent),
+  }));
+  const donutRest = sorted.slice(5).reduce((sum, item) => sum + item.allocationPercent, 0);
+  if (donutRest > 0.5) {
+    donutData.push({ color: "#8d99ab", name: tx(locale, "Others"), value: donutRest });
+  }
+  if (donutData.length === 0) return null;
+  return (
+    <section className="rounded-[24px] border border-line bg-[var(--surface-raised)] p-4 shadow-[var(--shadow-soft)]">
+      <h2 className="text-[15px] font-semibold text-ink">{tx(locale, "Allocation")}</h2>
+      <div className="relative mx-auto mt-2 h-[190px] w-full">
+        <ResponsiveContainer height="100%" width="100%">
+          <PieChart>
+            <Pie
+              cornerRadius={5}
+              data={donutData}
+              dataKey="value"
+              endAngle={-270}
+              innerRadius={62}
+              isAnimationActive={false}
+              label={renderMobileDonutPercentLabel}
+              labelLine={false}
+              outerRadius={82}
+              paddingAngle={2}
+              startAngle={90}
+              stroke="none"
+            >
+              {donutData.map((entry) => (
+                <Cell fill={entry.color} key={entry.name} />
+              ))}
+            </Pie>
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+          <p className="text-[10px] text-titanium">{tx(locale, "Assets")}</p>
+          <p className="text-xl font-semibold tracking-[-0.03em] text-ink">{holdings.length}</p>
+        </div>
+      </div>
+      <div className="mt-2 space-y-1">
+        {donutData.map((entry) => (
+          <div className="flex items-center justify-between gap-3 py-1.5" key={entry.name}>
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: entry.color }} />
+              <span className="truncate text-xs font-medium text-ink">{entry.name}</span>
+            </span>
+            <span className="flex shrink-0 items-center gap-2">
+              <span className="h-1 w-16 overflow-hidden rounded-full bg-[var(--surface-muted)]">
+                <span className="block h-full rounded-full" style={{ backgroundColor: entry.color, width: `${Math.min(100, Math.max(2, entry.value))}%` }} />
+              </span>
+              <span className="w-11 text-right text-xs tabular-nums text-titanium">{entry.value.toFixed(1)}%</span>
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function renderMobileDonutPercentLabel({ cx, cy, midAngle, middleRadius, percent }: PieLabelRenderProps) {
+  const share = (percent ?? 0) * 100;
+  if (share < 5) return null;
+
+  const angle = -(Number(midAngle) * Math.PI) / 180;
+  const radius = Number(middleRadius);
+  const x = Number(cx) + radius * Math.cos(angle);
+  const y = Number(cy) + radius * Math.sin(angle);
+
+  return (
+    <text
+      dominantBaseline="central"
+      fill="#fff"
+      fontSize={10}
+      fontWeight={700}
+      paintOrder="stroke"
+      pointerEvents="none"
+      stroke="rgba(0, 0, 0, 0.65)"
+      strokeWidth={3}
+      textAnchor="middle"
+      x={x}
+      y={y}
+    >
+      {share < 10 ? share.toFixed(1) : share.toFixed(0)}%
+    </text>
+  );
+}
+
 function MobileHoldings({
+  cashOnly = false,
   demo,
   holdings,
+  investmentTransactions,
   locale,
   onAdd,
   onDelete,
+  onEdit,
+  onSell,
 }: {
+  cashOnly?: boolean;
   demo: boolean;
   holdings: EnrichedHolding[];
+  investmentTransactions?: InvestmentTransaction[];
   locale: Locale;
   onAdd: () => void;
   onDelete: (id: string) => void;
+  onEdit: (holding: Holding) => void;
+  onSell?: (holding: EnrichedHolding) => void;
 }) {
   const money = useMoney();
-  const [sort, setSort] = useState<"value" | "day" | "return">("value");
+  const t = getDictionary(locale);
+  const [sort, setSort] = useState<"price" | "day" | "return">("price");
+  const [view, setView] = useState<"bubbles" | "list">(() => {
+    if (typeof window === "undefined" || cashOnly) return "list";
+    return window.localStorage.getItem("holdingsView") === "list" ? "list" : "bubbles";
+  });
+  const [selectedBubble, setSelectedBubble] = useState<EnrichedHolding | null>(null);
+  const [bubbleFilter, setBubbleFilter] = useState<AssetType | "all">("all");
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const showBubbles = !cashOnly && view === "bubbles";
+
+  function selectView(next: "bubbles" | "list") {
+    tapLight();
+    setView(next);
+    window.localStorage.setItem("holdingsView", next);
+  }
   const totalValue = holdings.reduce((sum, holding) => sum + holding.valueUsd, 0);
   const sorters: Record<typeof sort, (a: EnrichedHolding, b: EnrichedHolding) => number> = {
-    value: (a, b) => b.valueUsd - a.valueUsd,
+    price: (a, b) => (b.quote?.priceUsd ?? -1) - (a.quote?.priceUsd ?? -1),
     day: (a, b) => b.dayChangeUsd - a.dayChangeUsd,
-    return: (a, b) => b.gainPercent - a.gainPercent,
+    return: (a, b) => Number(b.gainKnown) - Number(a.gainKnown) || b.gainPercent - a.gainPercent,
   };
-  const groups = (
-    [
+  const groupDefinitions: Array<{ label: string; type: AssetType }> = cashOnly
+    ? [{ label: tx(locale, "Cash"), type: "cash" }]
+    : [
+      { label: t.stock, type: "stock" },
       { label: tx(locale, "US stocks"), type: "us_stock" },
       { label: tx(locale, "Taiwan stocks"), type: "tw_stock" },
       { label: tx(locale, "Crypto"), type: "crypto" },
-      { label: tx(locale, "Cash"), type: "cash" },
-    ] as const
-  )
+    ];
+  const groups = groupDefinitions
     .map((group) => ({
       ...group,
       items: holdings.filter((holding) => holding.asset_type === group.type).sort(sorters[sort]),
@@ -638,7 +845,7 @@ function MobileHoldings({
     }))
     .filter((group) => group.items.length > 0);
   const sortOptions = [
-    { id: "value", label: tx(locale, "Value") },
+    { id: "price", label: t.currentPrice },
     { id: "day", label: tx(locale, "Today") },
     { id: "return", label: tx(locale, "Return") },
   ] as const;
@@ -651,10 +858,74 @@ function MobileHoldings({
         type="button"
       >
         <Plus size={19} />
-        {tx(locale, "Add holding")}
+        {cashOnly ? tx(locale, "Add cash account") : tx(locale, "Add holding")}
       </button>
 
-      <div className="grid grid-cols-3 gap-1 rounded-full border border-line bg-[var(--surface-muted)] p-1">
+      {!cashOnly && (
+        <div className="grid grid-cols-2 gap-1 rounded-full border border-line bg-[var(--surface-muted)] p-1">
+          {([
+            { id: "bubbles", label: tx(locale, "Bubbles") },
+            { id: "list", label: tx(locale, "List") },
+          ] as const).map((mode) => (
+            <button
+              aria-pressed={view === mode.id}
+              className={clsx(
+                "focus-ring min-h-9 rounded-full px-1.5 text-[11px] font-semibold transition",
+                view === mode.id ? "bg-[var(--surface-raised)] text-[var(--accent)] shadow-sm" : "text-titanium",
+              )}
+              key={mode.id}
+              onClick={() => selectView(mode.id)}
+              type="button"
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {showBubbles && (
+        <section className="rounded-[24px] border border-line bg-[var(--surface-raised)] p-4 shadow-[var(--shadow-soft)]">
+          <div className="flex flex-wrap gap-1.5">
+            {([{ label: tx(locale, "All"), type: "all" as const }, ...groupDefinitions]).map((chip) => (
+              <button
+                aria-pressed={bubbleFilter === chip.type}
+                className={clsx(
+                  "focus-ring min-h-9 rounded-full border px-3 text-[11px] font-semibold transition",
+                  bubbleFilter === chip.type
+                    ? "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent)]"
+                    : "border-line bg-[var(--surface-muted)] text-titanium",
+                )}
+                key={chip.type}
+                onClick={() => {
+                  tapLight();
+                  setBubbleFilter(chip.type);
+                }}
+                type="button"
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+          <HoldingBubbles
+            holdings={holdings.filter(
+              (holding) =>
+                groupDefinitions.some((group) => group.type === holding.asset_type) &&
+                (bubbleFilter === "all" || holding.asset_type === bubbleFilter),
+            )}
+            locale={locale}
+            onSelect={(holding) => {
+              tapLight();
+              setSelectedBubble(holding);
+            }}
+          />
+          <p className="mt-3 text-center text-[10px] leading-4 text-titanium">
+            {tx(locale, "Bubble size shows weight, color shows today's move. Tap a bubble for details.")}
+          </p>
+        </section>
+      )}
+
+      {!showBubbles && (<>
+      {!cashOnly && <div className="grid grid-cols-3 gap-1 rounded-full border border-line bg-[var(--surface-muted)] p-1">
         {sortOptions.map((option) => (
           <button
             aria-pressed={sort === option.id}
@@ -669,7 +940,7 @@ function MobileHoldings({
             {option.label}
           </button>
         ))}
-      </div>
+      </div>}
 
       {groups.map((group) => {
         const subtotal = group.items.reduce((sum, holding) => sum + holding.valueUsd, 0);
@@ -688,47 +959,131 @@ function MobileHoldings({
             <div className="space-y-3">
               {group.items.map((holding) => {
                 const dayPercent = holding.quote?.dayChangePercent;
+                const editable = !demo && !holding.id.startsWith("overview:");
                 return (
-                  <article className="rounded-[22px] border border-line bg-[var(--surface-raised)] p-4 shadow-[var(--shadow-soft)]" key={holding.id}>
-                    <div className="flex items-start justify-between gap-3">
+                  <article
+                    className="relative rounded-[22px] border border-line bg-[var(--surface-raised)] p-4 shadow-[var(--shadow-soft)]"
+                    key={holding.id}
+                  >
+                    <div className="flex items-center justify-between gap-3">
                       <div className="flex min-w-0 items-center gap-3">
-                        <AssetMark assetType={holding.asset_type} symbol={holding.symbol} />
+                        <AssetMark assetType={holding.asset_type} name={holding.name} symbol={holding.symbol} />
                         <div className="min-w-0">
                           <p className="truncate font-semibold text-ink">{holding.symbol}</p>
                           <p className="mt-0.5 truncate text-xs text-titanium">{holding.name}</p>
                         </div>
                       </div>
-                      <div className="shrink-0 text-right">
-                        <p className="font-semibold text-ink">{money.fmtUsd(holding.valueUsd)}</p>
-                        <p className={clsx("mt-0.5 text-xs", holding.cost_known === false ? "text-titanium" : holding.gainUsd >= 0 ? "text-mint" : "text-rose")}>
-                          {holding.cost_known === false ? "N/A" : formatPercent(holding.gainPercent)}
-                        </p>
-                        {typeof dayPercent === "number" && holding.asset_type !== "cash" && (
-                          <span
-                            className={clsx(
-                              "mt-1 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-bold",
-                              dayPercent >= 0 ? "bg-mint/10 text-mint" : "bg-rose/10 text-rose",
-                            )}
+                      {editable && (
+                        <div className="relative shrink-0">
+                          <button
+                            aria-expanded={menuFor === holding.id}
+                            aria-label={`${tx(locale, "More options")} ${cashOnly ? holding.name : holding.symbol}`}
+                            className="focus-ring grid h-9 w-9 place-items-center rounded-full border border-line bg-[var(--surface-muted)] text-titanium shadow-sm transition hover:text-ink"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              tapLight();
+                              setMenuFor((current) => current === holding.id ? null : holding.id);
+                            }}
+                            type="button"
                           >
-                            {dayPercent >= 0 ? <TrendingUp size={9} /> : <TrendingDown size={9} />}
-                            {formatPercent(dayPercent)} {tx(locale, "1D")}
-                          </span>
-                        )}
+                            <MoreHorizontal size={16} />
+                          </button>
+                          {menuFor === holding.id && (
+                            <>
+                              <div aria-hidden="true" className="fixed inset-0 z-40" onClick={(event) => { event.stopPropagation(); setMenuFor(null); }} />
+                              <div className="absolute right-0 top-full z-50 mt-1 w-40 overflow-hidden rounded-2xl border border-line bg-panel shadow-xl">
+                                {holding.source_kind !== "wallet" && onSell && !cashOnly && (
+                                  <button
+                                    className="focus-ring flex min-h-11 w-full items-center gap-2 px-4 text-sm font-semibold text-rose transition hover:bg-rose/10"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setMenuFor(null);
+                                      onSell(holding);
+                                    }}
+                                    type="button"
+                                  >
+                                    <TrendingDown size={14} />
+                                    {getRecordSaleLabel(locale)}
+                                  </button>
+                                )}
+                                <button
+                                  className={clsx("focus-ring flex min-h-11 w-full items-center gap-2 px-4 text-sm font-semibold text-ink transition hover:bg-white/10", holding.source_kind !== "wallet" && onSell && !cashOnly && "border-t border-line")}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setMenuFor(null);
+                                    onEdit(holding);
+                                  }}
+                                  type="button"
+                                >
+                                  <Pencil size={14} />
+                                  {tx(locale, "Edit")}
+                                </button>
+                                {holding.source_kind !== "wallet" && (
+                                  <button
+                                    className="focus-ring flex min-h-11 w-full items-center gap-2 border-t border-line px-4 text-sm font-semibold text-rose transition hover:bg-rose/10"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setMenuFor(null);
+                                      onDelete(holding.id);
+                                    }}
+                                    type="button"
+                                  >
+                                    <Trash2 size={14} />
+                                    {tx(locale, "Delete")}
+                                  </button>
+                                )}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-3 flex items-end justify-between gap-3">
+                      <div className="min-w-0">
+                        {!cashOnly && <p className="text-[10px] text-titanium">{t.currentPrice}</p>}
+                        <p className="mt-0.5 truncate text-lg font-semibold tracking-[-0.02em] text-ink">
+                          {cashOnly ? money.fmtAmountFull(holding.quantity, holding.cost_currency) : formatCurrentPrice(holding.quote, money) ?? t.priceUnavailable}
+                        </p>
                       </div>
+                      {!cashOnly && (
+                        <div className="shrink-0 text-right">
+                          <div className="flex items-center justify-end gap-0.5">
+                            <p className={clsx("text-xs font-semibold", !holding.gainKnown ? "text-titanium" : holding.gainUsd >= 0 ? "text-mint" : "text-rose")}>
+                              {!holding.gainKnown ? "N/A" : formatPercent(holding.gainPercent)}
+                            </p>
+                            {holding.gainEstimated && (
+                              <GainCoverageWarning compact label={t.gainEstimateWarning} text={t.gainEstimateWarning} />
+                            )}
+                          </div>
+                          {typeof dayPercent === "number" && holding.asset_type !== "cash" && (
+                            <span
+                              className={clsx(
+                                "mt-1 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-bold",
+                                dayPercent >= 0 ? "bg-mint/10 text-mint" : "bg-rose/10 text-rose",
+                              )}
+                            >
+                              {dayPercent >= 0 ? <TrendingUp size={9} /> : <TrendingDown size={9} />}
+                              {formatPercent(dayPercent)} {tx(locale, "1D")}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <div className="mt-4 grid grid-cols-3 gap-2 rounded-2xl bg-[var(--surface-muted)] p-3 text-xs">
-                      <AssetFact label={tx(locale, "Quantity")} value={formatQuantity(holding.quantity)} />
-                      <AssetFact label={tx(locale, "Avg. cost")} value={holding.cost_known === false ? "N/A" : money.fmtAmount(holding.average_cost, holding.cost_currency)} />
-                      <AssetFact label={tx(locale, "Weight")} value={`${holding.allocationPercent.toFixed(1)}%`} />
-                    </div>
-                    {!demo && holding.source_kind !== "wallet" && !holding.id.startsWith("overview:") && (
-                      <button
-                        className="focus-ring ml-auto mt-3 flex items-center rounded-full bg-rose/10 px-3 py-1.5 text-[11px] font-semibold text-rose"
-                        onClick={() => onDelete(holding.id)}
-                        type="button"
-                      >
-                        {tx(locale, "Delete holding")}
-                      </button>
+                    {cashOnly ? (
+                      <div className="mt-4 grid grid-cols-2 gap-2 rounded-2xl bg-[var(--surface-muted)] p-3 text-xs">
+                        <AssetFact label={t.currency} value={holding.cost_currency} />
+                        <AssetFact label={t.convertedAmount} value={money.fmtUsd(holding.valueUsd)} />
+                      </div>
+                    ) : (
+                      <div className="mt-4 grid grid-cols-3 gap-2 rounded-2xl bg-[var(--surface-muted)] p-3 text-xs">
+                        <AssetFact label={tx(locale, "Quantity")} value={formatQuantity(holding.quantity)} />
+                        <AssetFact label={tx(locale, "Avg. cost")} value={holding.cost_known === false ? "N/A" : money.fmtAmount(holding.average_cost, holding.cost_currency)} />
+                        <AssetFact
+                          label={!holding.gainKnown ? t.gainLoss : holding.gainUsd > 0 ? t.profitAmount : holding.gainUsd < 0 ? t.lossAmount : t.gainLoss}
+                          tone={!holding.gainKnown || holding.gainUsd === 0 ? undefined : holding.gainUsd > 0 ? "positive" : "negative"}
+                          value={formatMobileGain(holding, money)}
+                        />
+                      </div>
                     )}
                   </article>
                 );
@@ -737,30 +1092,142 @@ function MobileHoldings({
           </section>
         );
       })}
+      </>)}
+
+      {!cashOnly && investmentTransactions && (
+        <InvestmentHistoryPanel compact locale={locale} transactions={investmentTransactions} />
+      )}
+
+      {selectedBubble && (() => {
+        const holding = selectedBubble;
+        const dayPercent = holding.asset_type === "cash" ? undefined : holding.quote?.dayChangePercent;
+        return (
+          <MobileSheet onClose={() => setSelectedBubble(null)} title={holding.symbol}>
+            <div className="space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <AssetMark assetType={holding.asset_type} name={holding.name} symbol={holding.symbol} />
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-ink">{holding.symbol}</p>
+                    <p className="mt-0.5 truncate text-xs text-titanium">{holding.name}</p>
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-[10px] text-titanium">{t.currentPrice}</p>
+                  <p className="font-semibold text-ink">{formatCurrentPrice(holding.quote, money) ?? t.priceUnavailable}</p>
+                  <div className="mt-0.5 flex items-center justify-end gap-0.5">
+                    <p className={clsx("text-xs", !holding.gainKnown ? "text-titanium" : holding.gainUsd >= 0 ? "text-mint" : "text-rose")}>
+                      {!holding.gainKnown ? "N/A" : formatPercent(holding.gainPercent)}
+                    </p>
+                    {holding.gainEstimated && (
+                      <GainCoverageWarning compact label={t.gainEstimateWarning} text={t.gainEstimateWarning} />
+                    )}
+                  </div>
+                  {typeof dayPercent === "number" && (
+                    <span
+                      className={clsx(
+                        "mt-1 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-bold",
+                        dayPercent >= 0 ? "bg-mint/10 text-mint" : "bg-rose/10 text-rose",
+                      )}
+                    >
+                      {dayPercent >= 0 ? <TrendingUp size={9} /> : <TrendingDown size={9} />}
+                      {formatPercent(dayPercent)} {tx(locale, "1D")}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2 rounded-2xl bg-[var(--surface-muted)] p-3 text-xs">
+                <AssetFact label={tx(locale, "Quantity")} value={formatQuantity(holding.quantity)} />
+                <AssetFact label={tx(locale, "Avg. cost")} value={holding.cost_known === false ? "N/A" : money.fmtAmount(holding.average_cost, holding.cost_currency)} />
+                <AssetFact
+                  label={!holding.gainKnown ? t.gainLoss : holding.gainUsd > 0 ? t.profitAmount : holding.gainUsd < 0 ? t.lossAmount : t.gainLoss}
+                  tone={!holding.gainKnown || holding.gainUsd === 0 ? undefined : holding.gainUsd > 0 ? "positive" : "negative"}
+                  value={formatMobileGain(holding, money)}
+                />
+              </div>
+              {!demo && !holding.id.startsWith("overview:") && (
+                <div className={clsx("grid gap-2", holding.source_kind !== "wallet" && onSell ? "grid-cols-3" : "grid-cols-2")}>
+                  {holding.source_kind !== "wallet" && onSell && (
+                    <button
+                      className="focus-ring flex min-h-11 items-center justify-center gap-1.5 rounded-full border border-rose/30 bg-rose/10 text-sm font-semibold text-rose transition hover:bg-rose/20"
+                      onClick={() => {
+                        setSelectedBubble(null);
+                        onSell(holding);
+                      }}
+                      type="button"
+                    >
+                      <TrendingDown size={14} />
+                      {getRecordSaleLabel(locale)}
+                    </button>
+                  )}
+                  <button
+                    className="focus-ring flex min-h-11 items-center justify-center gap-1.5 rounded-full border border-line bg-[var(--surface-muted)] text-sm font-semibold text-ink transition hover:bg-white/10"
+                    onClick={() => {
+                      setSelectedBubble(null);
+                      onEdit(holding);
+                    }}
+                    type="button"
+                  >
+                    <Pencil size={14} />
+                    {tx(locale, "Edit")}
+                  </button>
+                  {holding.source_kind !== "wallet" && (
+                    <button
+                      className="focus-ring flex min-h-11 items-center justify-center gap-1.5 rounded-full border border-rose/30 bg-rose/10 text-sm font-semibold text-rose transition hover:bg-rose/20"
+                      onClick={() => {
+                        setSelectedBubble(null);
+                        onDelete(holding.id);
+                      }}
+                      type="button"
+                    >
+                      <Trash2 size={14} />
+                      {tx(locale, "Delete holding")}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </MobileSheet>
+        );
+      })()}
     </div>
   );
 }
 
 function MobileCashflow({
+  assetValue,
+  cashValue,
   debts,
+  demo,
   locale,
   recurringExpenses,
   transactions,
   onAdd,
   onAddDebt,
   onAddRecurring,
+  onDeleteDebt,
+  onDeleteRecurring,
+  onEditDebt,
+  onEditRecurring,
 }: {
+  assetValue: number;
+  cashValue: number;
   debts: Debt[];
+  demo: boolean;
   locale: Locale;
   recurringExpenses: RecurringExpense[];
   transactions: CashflowTransaction[];
   onAdd: (type: CashflowType, date?: string) => void;
   onAddDebt: () => void;
   onAddRecurring: () => void;
+  onDeleteDebt: (id: string) => void;
+  onDeleteRecurring: (id: string) => void;
+  onEditDebt: (debt: Debt) => void;
+  onEditRecurring: (expense: RecurringExpense) => void;
 }) {
   const money = useMoney();
   const zh = locale === "zh";
-  const [section, setSection] = useState<"transactions" | "recurring" | "debts">("transactions");
+  const [section, setSection] = useState<"transactions" | "recurring" | "debts" | "flow">("transactions");
   const todayKey = localDateKey(new Date());
   const [selectedDate, setSelectedDate] = useState(todayKey);
   const [calendarMonth, setCalendarMonth] = useState(() => {
@@ -780,6 +1247,7 @@ function MobileCashflow({
   const buckets = getTransactionBuckets(currentMonthTransactions);
   const [expenseHistoryOpen, setExpenseHistoryOpen] = useState(false);
   const sections = [
+    { id: "flow", label: financialCopy(locale).tab },
     { id: "transactions", label: tx(locale, "Cashflow") },
     { id: "recurring", label: tx(locale, "Recurring") },
     { id: "debts", label: tx(locale, "Debts") },
@@ -788,22 +1256,22 @@ function MobileCashflow({
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
-        <MobileMetric icon={<TrendingUp size={18} />} label={tx(locale, "Monthly income")} tone="positive" value={formatBuckets(money, buckets.income)} />
+        <MobileMetric icon={<TrendingUp size={18} />} label={tx(locale, "Monthly income")} tone="positive" value={formatCurrencyBuckets(money, buckets.income)} />
         <MobileMetric
           icon={<TrendingDown size={18} />}
           label={tx(locale, "Monthly expenses")}
           tone="negative"
-          value={formatBuckets(money, buckets.expense)}
+          value={formatCurrencyBuckets(money, buckets.expense)}
           onClick={() => setExpenseHistoryOpen(true)}
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-1 rounded-full border border-line bg-[var(--surface-muted)] p-1">
+      <div className="grid grid-cols-4 gap-1 rounded-full border border-line bg-[var(--surface-muted)] p-1">
         {sections.map((item) => (
           <button
             aria-pressed={section === item.id}
             className={clsx(
-              "focus-ring min-h-10 rounded-full px-1.5 text-[11px] font-semibold leading-4 transition",
+              "focus-ring min-h-11 rounded-full px-1.5 text-[11px] font-semibold leading-4 transition",
               section === item.id
                 ? "bg-[var(--surface-raised)] text-[var(--accent)] shadow-sm"
                 : "text-titanium",
@@ -817,6 +1285,7 @@ function MobileCashflow({
         ))}
       </div>
 
+      {section === "flow" && <CashflowFlow transactions={transactions} debts={debts} assetValue={assetValue} cashValue={cashValue} locale={locale} />}
       {section === "transactions" && (
         <>
           <button className="focus-ring primary-button flex min-h-12 w-full items-center justify-center gap-2 rounded-full font-semibold" onClick={() => onAdd("expense", selectedDate)} type="button">
@@ -859,7 +1328,7 @@ function MobileCashflow({
                       {expense.frequency === "monthly" ? (tx(locale, "Monthly")) : (tx(locale, "Yearly"))}
                     </p>
                   </div>
-                  <p className="shrink-0 font-semibold text-ink">{money.fmtAmount(expense.amount, expense.currency)}</p>
+                  <p className="shrink-0 font-semibold text-ink">{money.fmtAmountFull(expense.amount, expense.currency)}</p>
                 </div>
                 <div className="mt-4 flex items-center justify-between rounded-2xl bg-[var(--surface-muted)] px-3 py-2.5 text-xs">
                   <span className={expense.is_active ? "text-mint" : "text-titanium"}>
@@ -867,6 +1336,30 @@ function MobileCashflow({
                   </span>
                   <span className="text-titanium">{tx(locale, "Next")} {formatDate(expense.next_due_date, locale)}</span>
                 </div>
+                {!demo && (
+                  <div className="mt-3 flex justify-end">
+                    <div className="inline-flex overflow-hidden rounded-full border border-line bg-[var(--surface-muted)] shadow-sm">
+                      <button
+                        aria-label={`${tx(locale, "Edit")} ${expense.name}`}
+                        className="focus-ring grid h-9 w-10 place-items-center text-titanium transition hover:bg-white/10 hover:text-ink"
+                        onClick={() => onEditRecurring(expense)}
+                        title={tx(locale, "Edit")}
+                        type="button"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        aria-label={`${tx(locale, "Delete")} ${expense.name}`}
+                        className="focus-ring grid h-9 w-10 place-items-center border-l border-line text-rose transition hover:bg-rose/10"
+                        onClick={() => onDeleteRecurring(expense.id)}
+                        title={tx(locale, "Delete")}
+                        type="button"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </article>
             )) : (
               <EmptyMobileState text={tx(locale, "No recurring expenses yet.")} />
@@ -890,14 +1383,38 @@ function MobileCashflow({
                     <p className="mt-1 text-xs text-titanium">{debt.lender || debtTypeLabel(debt.debt_type, locale)}</p>
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className="font-semibold text-ink">{money.fmtAmount(debt.remaining_principal, debt.currency)}</p>
+                    <p className="font-semibold text-ink">{money.fmtAmountFull(debt.remaining_principal, debt.currency)}</p>
                     <p className="mt-1 text-xs text-titanium">{debt.interest_rate.toFixed(2)}% APR</p>
                   </div>
                 </div>
                 <div className="mt-4 grid grid-cols-2 gap-2 rounded-2xl bg-[var(--surface-muted)] p-3 text-xs">
-                  <AssetFact label={tx(locale, "Minimum")} value={money.fmtAmount(debt.minimum_payment, debt.currency)} />
+                  <AssetFact label={tx(locale, "Minimum")} value={money.fmtAmountFull(debt.minimum_payment, debt.currency)} />
                   <AssetFact label={tx(locale, "Next payment")} value={formatDate(debt.next_payment_date, locale)} />
                 </div>
+                {!demo && (
+                  <div className="mt-3 flex justify-end">
+                    <div className="inline-flex overflow-hidden rounded-full border border-line bg-[var(--surface-muted)] shadow-sm">
+                      <button
+                        aria-label={`${tx(locale, "Edit")} ${debt.name}`}
+                        className="focus-ring grid h-9 w-10 place-items-center text-titanium transition hover:bg-white/10 hover:text-ink"
+                        onClick={() => onEditDebt(debt)}
+                        title={tx(locale, "Edit")}
+                        type="button"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        aria-label={`${tx(locale, "Delete")} ${debt.name}`}
+                        className="focus-ring grid h-9 w-10 place-items-center border-l border-line text-rose transition hover:bg-rose/10"
+                        onClick={() => onDeleteDebt(debt.id)}
+                        title={tx(locale, "Delete")}
+                        type="button"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </article>
             )) : (
               <EmptyMobileState text={tx(locale, "No debts yet.")} />
@@ -916,7 +1433,7 @@ function MobileCashflow({
                   year: "numeric",
                 })}
               </p>
-              <p className="mt-1 text-2xl font-semibold tracking-[-0.04em] text-rose">{formatBuckets(money, buckets.expense)}</p>
+              <p className="mt-1 text-2xl font-semibold tracking-[-0.04em] text-rose">{formatCurrencyBuckets(money, buckets.expense)}</p>
             </div>
             <span className="rounded-full bg-[var(--surface-raised)] px-3 py-1.5 text-xs font-medium text-titanium">
               {zh ? `共 ${currentMonthExpenses.length} 筆` : `${currentMonthExpenses.length} records`}
@@ -944,7 +1461,7 @@ function MobileCashflow({
                       {transaction.notes && <p className="mt-1 line-clamp-2 text-xs text-titanium">{transaction.notes}</p>}
                     </div>
                   </div>
-                  <p className="shrink-0 text-sm font-semibold text-rose">-{money.fmtAmount(transaction.amount, transaction.currency)}</p>
+                  <p className="shrink-0 text-sm font-semibold text-rose">-{money.fmtAmountFull(transaction.amount, transaction.currency)}</p>
                 </article>
               ))}
             </div>
@@ -1151,7 +1668,7 @@ function MobileCashflowCalendar({
                   <p className="mt-0.5 text-[10px] text-titanium">{transaction.category}</p>
                 </div>
                 <p className={clsx("shrink-0 text-sm font-semibold", transaction.transaction_type === "income" ? "text-mint" : "text-rose")}>
-                  {transaction.transaction_type === "income" ? "+" : "-"}{money.fmtAmount(transaction.amount, transaction.currency)}
+                  {transaction.transaction_type === "income" ? "+" : "-"}{money.fmtAmountFull(transaction.amount, transaction.currency)}
                 </p>
               </div>
             ))}
@@ -1163,9 +1680,7 @@ function MobileCashflowCalendar({
 }
 
 function MobileInsights({
-  budgets,
   debts,
-  enriched,
   holdings,
   locale,
   recurringExpenses,
@@ -1173,9 +1688,7 @@ function MobileInsights({
   transactions,
   fx,
 }: {
-  budgets: MonthlyBudget[];
   debts: Debt[];
-  enriched: EnrichedHolding[];
   holdings: EnrichedHolding[];
   locale: Locale;
   recurringExpenses: RecurringExpense[];
@@ -1184,8 +1697,6 @@ function MobileInsights({
   fx: CurrencyFxInput;
 }) {
   const money = useMoney();
-  const zh = locale === "zh";
-  const sorted = [...holdings].sort((a, b) => b.allocationPercent - a.allocationPercent);
   const activeRecurring = recurringExpenses.filter((expense) => expense.is_active);
   const annualRecurringUsd = activeRecurring.reduce(
     (sum, expense) =>
@@ -1198,19 +1709,10 @@ function MobileInsights({
     0,
   );
   const performanceHoldings = holdings.filter(
-    (item) => item.asset_type !== "cash" && item.cost_known !== false,
+    (item) => item.asset_type !== "cash" && item.gainConfirmed,
   );
   const best = [...performanceHoldings].sort((a, b) => b.gainPercent - a.gainPercent)[0];
   const worst = [...performanceHoldings].sort((a, b) => a.gainPercent - b.gainPercent)[0];
-  const donutData = sorted.slice(0, 5).map((holding, index) => ({
-    color: chartPalette[index % chartPalette.length],
-    name: holding.symbol.replace(/\..*$/, ""),
-    value: Math.max(0, holding.allocationPercent),
-  }));
-  const donutRest = sorted.slice(5).reduce((sum, item) => sum + item.allocationPercent, 0);
-  if (donutRest > 0.5) {
-    donutData.push({ color: "#8d99ab", name: tx(locale, "Others"), value: donutRest });
-  }
 
   const debtPrincipalUsd = debts
     .filter((debt) => debt.is_active)
@@ -1222,17 +1724,6 @@ function MobileInsights({
 
   return (
     <div className="space-y-4">
-      <MobileHealthSection
-        budgets={budgets}
-        debts={debts}
-        enriched={enriched}
-        locale={locale}
-        recurringExpenses={recurringExpenses}
-        totals={totals}
-        transactions={transactions}
-        fx={fx}
-      />
-
       <section className="relative overflow-hidden rounded-[26px] border border-line bg-[var(--surface-raised)] p-5 shadow-[var(--shadow-soft)]">
         <div className="pointer-events-none absolute -right-16 -top-24 h-56 w-56 rounded-full bg-[var(--accent)] opacity-[0.14] blur-3xl" />
         <div className="relative">
@@ -1261,61 +1752,21 @@ function MobileInsights({
       <section className="relative overflow-hidden rounded-[26px] border border-line bg-[var(--surface-raised)] p-5 shadow-[var(--shadow-soft)]">
         <div className="pointer-events-none absolute -right-14 -top-20 h-48 w-48 rounded-full bg-[var(--accent)] opacity-[0.12] blur-3xl" />
         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-titanium">{tx(locale, "Total return")}</p>
-        <p className={clsx("mt-2 text-[2.25rem] font-semibold leading-none tracking-[-0.045em]", totals.totalReturn >= 0 ? "text-mint" : "text-rose")}>
-          {formatPercent(totals.totalReturn)}
-        </p>
+        <div className="mt-2 flex items-center gap-2">
+          <p className={clsx("text-[2.25rem] font-semibold leading-none tracking-[-0.045em]", !totals.hasGainData ? "text-ink" : totals.totalReturn >= 0 ? "text-mint" : "text-rose")}>
+            {totals.hasGainData ? formatPercent(totals.totalReturn) : "N/A"}
+          </p>
+          {totals.gainInvestmentCount > 0 && !totals.gainDataComplete && (
+            <GainCoverageWarning
+              label={getDictionary(locale).gainCoverageWarning.replace("{known}", String(totals.gainKnownCount)).replace("{total}", String(totals.gainInvestmentCount))}
+              text={getDictionary(locale).gainCoverageWarning.replace("{known}", String(totals.gainKnownCount)).replace("{total}", String(totals.gainInvestmentCount))}
+            />
+          )}
+        </div>
         <p className="mt-2.5 text-xs text-titanium">
           {tx(locale, "Includes assets with known cost basis only.")}
         </p>
       </section>
-
-      {donutData.length > 0 && (
-        <section className="rounded-[24px] border border-line bg-[var(--surface-raised)] p-4 shadow-[var(--shadow-soft)]">
-          <h2 className="text-[15px] font-semibold text-ink">{tx(locale, "Allocation")}</h2>
-          <div className="relative mx-auto mt-2 h-[190px] w-full">
-            <ResponsiveContainer height="100%" width="100%">
-              <PieChart>
-                <Pie
-                  cornerRadius={5}
-                  data={donutData}
-                  dataKey="value"
-                  endAngle={-270}
-                  innerRadius={62}
-                  isAnimationActive={false}
-                  outerRadius={82}
-                  paddingAngle={2}
-                  startAngle={90}
-                  stroke="none"
-                >
-                  {donutData.map((entry) => (
-                    <Cell fill={entry.color} key={entry.name} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-              <p className="text-[10px] text-titanium">{tx(locale, "Assets")}</p>
-              <p className="text-xl font-semibold tracking-[-0.03em] text-ink">{holdings.length}</p>
-            </div>
-          </div>
-          <div className="mt-2 space-y-1">
-            {donutData.map((entry) => (
-              <div className="flex items-center justify-between gap-3 py-1.5" key={entry.name}>
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: entry.color }} />
-                  <span className="truncate text-xs font-medium text-ink">{entry.name}</span>
-                </span>
-                <span className="flex shrink-0 items-center gap-2">
-                  <span className="h-1 w-16 overflow-hidden rounded-full bg-[var(--surface-muted)]">
-                    <span className="block h-full rounded-full" style={{ backgroundColor: entry.color, width: `${Math.min(100, Math.max(2, entry.value))}%` }} />
-                  </span>
-                  <span className="w-11 text-right text-xs tabular-nums text-titanium">{entry.value.toFixed(1)}%</span>
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
 
       {expenseDonut.length > 0 && (
         <section className="rounded-[24px] border border-line bg-[var(--surface-raised)] p-4 shadow-[var(--shadow-soft)]">
@@ -1374,9 +1825,10 @@ function MobileInsights({
           <p className="text-[11px] font-medium text-titanium">{tx(locale, "Annual recurring cost")}</p>
           <p className="mt-1.5 text-2xl font-semibold tracking-[-0.04em] text-ink">{money.fmtUsd(annualRecurringUsd)}</p>
           <p className="mt-1 text-xs text-titanium">
-            {zh
-              ? `約每月 ${money.fmtUsd(annualRecurringUsd / 12)} · ${activeRecurring.length} 個項目`
-              : `≈ ${money.fmtUsd(annualRecurringUsd / 12)} per month · ${activeRecurring.length} items`}
+            {tx(locale, "≈ {amount} per month · {count} items", {
+              amount: money.fmtUsd(annualRecurringUsd / 12),
+              count: activeRecurring.length,
+            })}
           </p>
         </section>
       )}
@@ -1386,349 +1838,6 @@ function MobileInsights({
         <PerformanceCard holding={worst} label={tx(locale, "Worst performer")} />
       </div>
     </div>
-  );
-}
-
-type PetMood = "thriving" | "happy" | "okay" | "tired" | "sick";
-
-function MobileHealthSection({
-  budgets,
-  debts,
-  enriched,
-  locale,
-  recurringExpenses,
-  totals,
-  transactions,
-  fx,
-}: {
-  budgets: MonthlyBudget[];
-  debts: Debt[];
-  enriched: EnrichedHolding[];
-  locale: Locale;
-  recurringExpenses: RecurringExpense[];
-  totals: ReturnType<typeof getPortfolioTotals>;
-  transactions: CashflowTransaction[];
-  fx: CurrencyFxInput;
-}) {
-  const money = useMoney();
-  const zh = locale === "zh";
-  const monthTransactions = transactions.filter((transaction) => isSameMonth(transaction.transaction_date));
-  const activeRecurring = recurringExpenses.filter((expense) => expense.is_active);
-  const activeDebts = debts.filter((debt) => debt.is_active);
-  const overview = getMonthlyCashflowOverview(monthTransactions, activeRecurring, activeDebts);
-  const currentMonthKey = new Date().toISOString().slice(0, 7);
-  const overBudgetCount = budgets
-    .filter((budget) => budget.month.slice(0, 7) === currentMonthKey)
-    .filter((budget) => {
-          const spent = monthTransactions
-            .filter(
-              (transaction) =>
-                transaction.transaction_type === "expense" &&
-                (budget.category === "total" || transaction.category === budget.category) &&
-                transaction.currency === budget.currency,
-            )
-        .reduce((sum, transaction) => sum + transaction.amount, 0);
-      return spent > budget.amount;
-    }).length;
-  const subscriptionsToReviewCount = activeRecurring.filter(
-    (expense) =>
-      expense.is_subscription &&
-      (expense.usage_status === "rarely_used" || expense.usage_status === "consider_canceling"),
-  ).length;
-  const unknownCostCount = enriched.filter((holding) => holding.cost_known === false).length;
-  const missingPriceCount = enriched.filter((holding) => holding.asset_type !== "cash" && !holding.quote).length;
-  const dataIssues = unknownCostCount + missingPriceCount;
-
-  const incomeUsd = currencyBucketsToUsd(overview.income, fx);
-  const fixedUsd = currencyBucketsToUsd(overview.recurring, fx) + currencyBucketsToUsd(overview.debtPayments, fx);
-  const leftoverUsd = currencyBucketsToUsd(overview.leftover, fx);
-  const debtPaymentUsd = currencyBucketsToUsd(overview.debtPayments, fx);
-  const debtPrincipalUsd = activeDebts.reduce(
-    (sum, debt) => sum + currencyAmountToUsd(debt.remaining_principal, debt.currency, fx),
-    0,
-  );
-  const netWorthUsd = totals.totalValue - debtPrincipalUsd;
-  const savingsRate = incomeUsd > 0 ? (leftoverUsd / incomeUsd) * 100 : null;
-  const fixedPressure = incomeUsd > 0 ? (fixedUsd / incomeUsd) * 100 : null;
-  const debtIncomeRatio = incomeUsd > 0 ? (debtPaymentUsd / incomeUsd) * 100 : null;
-
-  const score = getFinancialHealthScore({ dataIssues, debtIncomeRatio, fixedPressure, savingsRate });
-  const notes = buildFinancialHealthNotes({
-    dataIssues,
-    debtIncomeRatio,
-    fixedPressure,
-    incomeUsd,
-    locale,
-    overBudgetCount,
-    savingsRate,
-    subscriptionsToReviewCount,
-    unknownCostCount,
-  });
-  const quests = buildHealthQuests({ dataIssues, debtIncomeRatio, fixedPressure, locale, savingsRate });
-
-  const mood: PetMood = score >= 85 ? "thriving" : score >= 70 ? "happy" : score >= 50 ? "okay" : score >= 30 ? "tired" : "sick";
-  const title = score >= 85
-    ? (tx(locale, "Money master"))
-    : score >= 70
-      ? (tx(locale, "Steady saver"))
-      : score >= 50
-        ? (tx(locale, "Working on it"))
-        : score >= 30
-          ? (tx(locale, "Feeling tight"))
-          : (tx(locale, "Needs rescue"));
-  const ringColor = score >= 70 ? "#34b27b" : score >= 50 ? "#d99a3d" : "#e05d5d";
-
-  const [previousScore, setPreviousScore] = useState<number | null>(null);
-  useEffect(() => {
-    const stored = window.localStorage.getItem("healthScore:last");
-    if (stored !== null && Number.isFinite(Number(stored))) {
-      setPreviousScore(Number(stored));
-    }
-  }, []);
-  useEffect(() => {
-    window.localStorage.setItem("healthScore:last", String(score));
-  }, [score]);
-  const delta = previousScore === null ? null : score - previousScore;
-
-  const messages = useMemo(() => {
-    const list = [...notes];
-    if (delta !== null && delta > 0) {
-      list.unshift(zh ? `我比上次健康了 ${delta} 分，繼續保持！` : `I'm ${delta} points healthier than last time. Keep it up!`);
-    } else if (delta !== null && delta < 0) {
-      list.unshift(zh ? `我比上次虛弱了 ${Math.abs(delta)} 分⋯⋯幫幫我。` : `I'm ${Math.abs(delta)} points weaker than last time... help me out.`);
-    }
-    return list;
-  }, [notes, delta, zh]);
-  const [messageIndex, setMessageIndex] = useState(0);
-  const message = messages[messageIndex % messages.length] ?? "";
-
-  return (
-    <>
-      <section className="relative overflow-hidden rounded-[26px] border border-line bg-[var(--surface-raised)] p-5 shadow-[var(--shadow-soft)]">
-        <div
-          className="pointer-events-none absolute -right-16 -top-24 h-56 w-56 rounded-full opacity-[0.14] blur-3xl"
-          style={{ backgroundColor: ringColor }}
-        />
-        <div className="relative">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-titanium">
-              {tx(locale, "Financial health")}
-            </p>
-            <span
-              className="rounded-full px-2.5 py-1 text-[11px] font-bold"
-              style={{ backgroundColor: `${ringColor}1f`, color: ringColor }}
-            >
-              {title}
-            </span>
-          </div>
-
-          <div className="mt-4 flex items-center gap-4">
-            <button
-              aria-label={tx(locale, "Talk to your pet")}
-              className="focus-ring relative h-[124px] w-[124px] shrink-0 rounded-full"
-              onClick={() => setMessageIndex((index) => index + 1)}
-              type="button"
-            >
-              <svg className="absolute inset-0 -rotate-90" viewBox="0 0 124 124">
-                <circle cx="62" cy="62" fill="none" r="57" stroke="var(--surface-muted)" strokeWidth="7" />
-                <circle
-                  cx="62"
-                  cy="62"
-                  fill="none"
-                  r="57"
-                  stroke={ringColor}
-                  strokeDasharray={`${(score / 100) * 2 * Math.PI * 57} ${2 * Math.PI * 57}`}
-                  strokeLinecap="round"
-                  strokeWidth="7"
-                />
-              </svg>
-              <span className="absolute inset-[13px] flex items-center justify-center overflow-hidden rounded-full bg-[var(--surface-muted)]">
-                <HealthPet mood={mood} />
-              </span>
-            </button>
-            <div className="min-w-0">
-              <p className="flex items-baseline gap-1">
-                <span className="text-[2.6rem] font-semibold leading-none tracking-[-0.045em] text-ink">{score}</span>
-                <span className="text-sm font-medium text-titanium">/ 100</span>
-              </p>
-              {delta !== null && delta !== 0 && (
-                <span
-                  className={clsx(
-                    "mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                    delta > 0 ? "bg-mint/10 text-mint" : "bg-rose/10 text-rose",
-                  )}
-                >
-                  {delta > 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
-                  {zh ? `比上次 ${delta > 0 ? "+" : ""}${delta} 分` : `${delta > 0 ? "+" : ""}${delta} since last visit`}
-                </span>
-              )}
-              <p className="mt-2 text-[10px] leading-4 text-titanium">
-                {tx(locale, "Tap the pet to hear more. A planning aid, not investment advice.")}
-              </p>
-            </div>
-          </div>
-
-          {message && (
-            <button
-              className="focus-ring relative mt-4 block w-full rounded-2xl bg-[var(--surface-muted)] p-3.5 text-left"
-              onClick={() => setMessageIndex((index) => index + 1)}
-              type="button"
-            >
-              <span className="absolute -top-1.5 left-[52px] h-3 w-3 rotate-45 bg-[var(--surface-muted)]" />
-              <span className="block text-xs leading-5 text-ink">{message}</span>
-              {messages.length > 1 && (
-                <span className="mt-1.5 block text-[9px] text-titanium">
-                  {messageIndex % messages.length + 1} / {messages.length} · {tx(locale, "Tap for next")}
-                </span>
-              )}
-            </button>
-          )}
-
-          <div className="mt-4 grid grid-cols-2 gap-2.5">
-            <HealthStat
-              label={tx(locale, "Net worth")}
-              status={netWorthUsd >= 0 ? "good" : "bad"}
-              value={money.fmtUsd(netWorthUsd)}
-            />
-            <HealthStat
-              label={tx(locale, "Savings rate")}
-              status={savingsRate === null ? "na" : savingsRate >= 20 ? "good" : savingsRate >= 10 ? "warn" : "bad"}
-              value={formatHealthRatio(savingsRate)}
-            />
-            <HealthStat
-              label={tx(locale, "Fixed pressure")}
-              status={fixedPressure === null ? "na" : fixedPressure <= 50 ? "good" : fixedPressure <= 70 ? "warn" : "bad"}
-              value={formatHealthRatio(fixedPressure)}
-            />
-            <HealthStat
-              label={tx(locale, "Debt-to-income")}
-              status={debtIncomeRatio === null ? "na" : debtIncomeRatio <= 20 ? "good" : debtIncomeRatio <= 36 ? "warn" : "bad"}
-              value={formatHealthRatio(debtIncomeRatio)}
-            />
-          </div>
-        </div>
-      </section>
-
-      <section className="rounded-[24px] border border-line bg-[var(--surface-raised)] p-4 shadow-[var(--shadow-soft)]">
-        <div className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
-            <Sparkles size={14} />
-          </span>
-          <h2 className="text-[15px] font-semibold text-ink">{tx(locale, "Heal your pet")}</h2>
-        </div>
-        {quests.length ? (
-          <div className="mt-2 divide-y divide-line">
-            {quests.map((quest) => (
-              <div className="flex items-center justify-between gap-3 py-3" key={quest.id}>
-                <p className="min-w-0 text-xs leading-5 text-ink">{quest.label}</p>
-                <span className="shrink-0 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-[11px] font-bold text-[var(--accent)]">
-                  +{quest.points}
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="mt-3 rounded-2xl bg-[var(--surface-muted)] p-4 text-center text-xs leading-5 text-titanium">
-            {tx(locale, "No quests right now — your pet is in great shape!")}
-          </p>
-        )}
-      </section>
-    </>
-  );
-}
-
-function HealthStat({
-  label,
-  status,
-  value,
-}: {
-  label: string;
-  status: "good" | "warn" | "bad" | "na";
-  value: string;
-}) {
-  const dotColor = status === "good" ? "#34b27b" : status === "warn" ? "#d99a3d" : status === "bad" ? "#e05d5d" : "#8d99ab";
-  return (
-    <div className="rounded-2xl bg-[var(--surface-muted)] p-3">
-      <div className="flex items-center gap-1.5">
-        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: dotColor }} />
-        <p className="truncate text-[10px] font-medium text-titanium">{label}</p>
-      </div>
-      <p className="mt-1 truncate text-sm font-semibold text-ink">{value}</p>
-    </div>
-  );
-}
-
-function HealthPet({ mood }: { mood: PetMood }) {
-  const body = mood === "sick" ? "#b8b09a" : mood === "tired" ? "#cbb578" : "#dabb5e";
-  const bodyDark = mood === "sick" ? "#a49c86" : mood === "tired" ? "#b49d5e" : "#c2a344";
-  const belly = mood === "sick" ? "#d6cfc0" : "#f0deA8";
-  const earTransform = mood === "tired" || mood === "sick" ? "rotate(18 34 34)" : undefined;
-  const earTransformRight = mood === "tired" || mood === "sick" ? "rotate(-18 86 34)" : undefined;
-
-  return (
-    <svg aria-hidden="true" className={`health-pet health-pet--${mood}`} height="92" viewBox="0 0 120 120" width="92">
-      {/* ears */}
-      <path d="M28 44 L34 18 L52 34 Z" fill={bodyDark} transform={earTransform} />
-      <path d="M92 44 L86 18 L68 34 Z" fill={bodyDark} transform={earTransformRight} />
-      {/* body */}
-      <ellipse cx="60" cy="70" fill={body} rx="40" ry="38" />
-      <ellipse cx="60" cy="84" fill={belly} rx="24" ry="18" />
-      {/* face */}
-      {mood === "thriving" && (
-        <>
-          <path d="M40 58 q5 -7 10 0" fill="none" stroke="#3a2d10" strokeLinecap="round" strokeWidth="3" />
-          <path d="M70 58 q5 -7 10 0" fill="none" stroke="#3a2d10" strokeLinecap="round" strokeWidth="3" />
-          <path d="M50 72 q10 10 20 0" fill="none" stroke="#3a2d10" strokeLinecap="round" strokeWidth="3" />
-          <g className="health-pet__sparkle" fill="#f2cf5b">
-            <path d="M99 30 l2.5 5.5 5.5 2.5 -5.5 2.5 -2.5 5.5 -2.5 -5.5 -5.5 -2.5 5.5 -2.5 Z" />
-            <path d="M18 48 l1.8 4 4 1.8 -4 1.8 -1.8 4 -1.8 -4 -4 -1.8 4 -1.8 Z" />
-            <path d="M103 66 l1.5 3.4 3.4 1.5 -3.4 1.5 -1.5 3.4 -1.5 -3.4 -3.4 -1.5 3.4 -1.5 Z" />
-          </g>
-        </>
-      )}
-      {mood === "happy" && (
-        <>
-          <circle cx="45" cy="58" fill="#3a2d10" r="4" />
-          <circle cx="75" cy="58" fill="#3a2d10" r="4" />
-          <circle cx="46.5" cy="56.5" fill="#fff" r="1.3" />
-          <circle cx="76.5" cy="56.5" fill="#fff" r="1.3" />
-          <path d="M52 71 q8 7 16 0" fill="none" stroke="#3a2d10" strokeLinecap="round" strokeWidth="3" />
-        </>
-      )}
-      {mood === "okay" && (
-        <>
-          <circle cx="45" cy="58" fill="#3a2d10" r="3.4" />
-          <circle cx="75" cy="58" fill="#3a2d10" r="3.4" />
-          <path d="M53 72 h14" fill="none" stroke="#3a2d10" strokeLinecap="round" strokeWidth="3" />
-        </>
-      )}
-      {mood === "tired" && (
-        <>
-          <path d="M40 59 h11" fill="none" stroke="#3a2d10" strokeLinecap="round" strokeWidth="3" />
-          <path d="M69 59 h11" fill="none" stroke="#3a2d10" strokeLinecap="round" strokeWidth="3" />
-          <path d="M52 74 q8 -6 16 0" fill="none" stroke="#3a2d10" strokeLinecap="round" strokeWidth="3" />
-          <path className="health-pet__sweat" d="M90 52 q6 8 0 12 q-6 -4 0 -12" fill="#7fb2e5" />
-        </>
-      )}
-      {mood === "sick" && (
-        <>
-          <path d="M41 54 l8 8 M49 54 l-8 8" stroke="#3a2d10" strokeLinecap="round" strokeWidth="2.6" />
-          <path d="M71 54 l8 8 M79 54 l-8 8" stroke="#3a2d10" strokeLinecap="round" strokeWidth="2.6" />
-          <path d="M51 75 q4 -4 9 0 q5 4 9 0" fill="none" stroke="#3a2d10" strokeLinecap="round" strokeWidth="2.6" />
-          <g transform="rotate(-24 60 34)">
-            <rect fill="#e8d9b0" height="7" rx="2.5" width="22" x="49" y="30" />
-            <rect fill="#e8d9b0" height="22" rx="2.5" transform="rotate(90 60 33.5)" width="7" x="56.5" y="22.5" />
-          </g>
-        </>
-      )}
-      {/* cheeks */}
-      {(mood === "thriving" || mood === "happy") && (
-        <>
-          <ellipse cx="37" cy="67" fill="#e08c6a" opacity="0.45" rx="4.5" ry="3" />
-          <ellipse cx="83" cy="67" fill="#e08c6a" opacity="0.45" rx="4.5" ry="3" />
-        </>
-      )}
-    </svg>
   );
 }
 
@@ -1769,27 +1878,45 @@ function buildExpenseCategoryDonut(transactions: CashflowTransaction[], fx: Curr
 }
 
 function MobileMore({
+  biometricAvailable,
+  biometricLock,
   demo,
   displayCurrency,
   locale,
+  nativePlatform,
+  paymentReminders,
   portfolioName,
   userEmail,
+  onBiometricLockChange,
   onDisplayCurrencyChange,
   onEditName,
   onLocaleChange,
+  onOpenBank,
+  onPaymentRemindersChange,
+  onDeleteAccount,
   onSignOut,
 }: {
+  biometricAvailable: boolean;
+  biometricLock: boolean;
   demo: boolean;
   displayCurrency: Currency;
   locale: Locale;
+  nativePlatform: boolean;
+  paymentReminders: boolean;
   portfolioName: string;
   userEmail: string;
+  onBiometricLockChange: (next: boolean) => void;
   onDisplayCurrencyChange: (currency: Currency) => void;
   onEditName: () => void;
   onLocaleChange: (locale: Locale) => void;
+  onOpenBank: () => void;
+  onPaymentRemindersChange: (next: boolean) => void;
+  onDeleteAccount: () => Promise<void>;
   onSignOut: () => void;
 }) {
-  const zh = locale === "zh";
+  const [deleteArmed, setDeleteArmed] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   return (
     <div className="space-y-4">
       <section className="rounded-[24px] border border-line bg-[var(--surface-raised)] p-4 shadow-[var(--shadow-soft)]">
@@ -1801,7 +1928,7 @@ function MobileMore({
             onClick={onEditName}
             type="button"
           >
-            {portfolioName ? (zh ? `${portfolioName}的資產` : `${portfolioName}'s assets`) : (tx(locale, "Not set"))}
+            {portfolioName || tx(locale, "Not set")}
             <Pencil className="text-titanium" size={12} />
           </button>
         </div>
@@ -1818,33 +1945,91 @@ function MobileMore({
           </select>
         </div>
         <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-4">
+          <span className="text-sm text-titanium">{tx(locale, "Bank")}</span>
+          <button className="focus-ring flex min-h-10 items-center gap-2 rounded-full border border-line bg-[var(--surface-muted)] px-3 text-sm font-semibold text-ink" onClick={onOpenBank} type="button">
+            <CircleDollarSign size={16} className="text-[var(--accent)]" />
+            {tx(locale, "Cash")}
+            <ChevronRight size={14} className="text-titanium" />
+          </button>
+        </div>
+        <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-4">
           <span className="text-sm text-titanium">{tx(locale, "Theme")}</span>
           <ThemeToggle compact locale={locale} />
         </div>
+        {biometricAvailable && (
+          <label className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-4">
+            <span className="text-sm text-titanium">{tx(locale, "Face ID / Touch ID unlock")}</span>
+            <input
+              checked={biometricLock}
+              className="h-5 w-5 shrink-0"
+              onChange={(event) => onBiometricLockChange(event.target.checked)}
+              type="checkbox"
+            />
+          </label>
+        )}
+        {nativePlatform && (
+          <label className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-4">
+            <span className="text-sm text-titanium">{tx(locale, "Payment reminders")}</span>
+            <input
+              checked={paymentReminders}
+              className="h-5 w-5 shrink-0"
+              onChange={(event) => onPaymentRemindersChange(event.target.checked)}
+              type="checkbox"
+            />
+          </label>
+        )}
         <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-4">
           <span className="text-sm text-titanium">{tx(locale, "Language")}</span>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <select
+            aria-label={tx(locale, "Language")}
+            className="input-control focus-ring min-h-10 w-[min(11rem,58vw)] rounded-full px-3 text-sm font-semibold text-ink"
+            value={locale}
+            onChange={(event) => onLocaleChange(event.target.value as Locale)}
+          >
             {localeOrder.map((item) => (
-              <button
-                className={clsx("focus-ring rounded-2xl border border-line px-3 py-2 text-sm font-semibold", locale === item ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "text-titanium")}
-                key={item}
-                onClick={() => onLocaleChange(item)}
-                type="button"
-              >
-                {localeNames[item]}
-              </button>
+              <option key={item} value={item}>{localeNames[item]}</option>
             ))}
-          </div>
+          </select>
         </div>
       </section>
       <section className="rounded-[24px] border border-line bg-[var(--surface-raised)] p-4 shadow-[var(--shadow-soft)]">
         <p className="text-xs text-titanium">{demo ? "Demo mode" : tx(locale, "Signed in")}</p>
         <p className="mt-1 truncate text-sm font-medium text-ink">{demo ? (tx(locale, "Read-only sample data")) : userEmail}</p>
         {!demo && (
-          <button className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border border-rose/20 bg-rose/10 text-sm font-semibold text-rose" onClick={onSignOut} type="button">
-            <LogOut size={17} />
-            {tx(locale, "Sign out")}
-          </button>
+          <>
+            <button className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border border-rose/20 bg-rose/10 text-sm font-semibold text-rose" onClick={onSignOut} type="button">
+              <LogOut size={17} />
+              {tx(locale, "Sign out")}
+            </button>
+            {deleteArmed && (
+              <p className="mt-4 rounded-2xl border border-rose/20 bg-rose/10 p-3 text-xs leading-5 text-rose">
+                {tx(locale, "This permanently deletes your account and all associated data. This cannot be undone.")}
+              </p>
+            )}
+            {deleteError && <p className="mt-3 text-xs text-rose" role="alert">{deleteError}</p>}
+            <button
+              className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border border-rose/25 bg-transparent text-sm font-semibold text-rose disabled:opacity-50"
+              disabled={deleting}
+              onClick={async () => {
+                if (!deleteArmed) {
+                  setDeleteArmed(true);
+                  return;
+                }
+                setDeleting(true);
+                setDeleteError("");
+                try {
+                  await onDeleteAccount();
+                } catch (error) {
+                  setDeleteError(error instanceof Error ? error.message : tx(locale, "Could not delete this account."));
+                  setDeleting(false);
+                }
+              }}
+              type="button"
+            >
+              <Trash2 size={16} />
+              {tx(locale, deleting ? "Deleting account..." : deleteArmed ? "Delete account permanently" : "Delete account")}
+            </button>
+          </>
         )}
       </section>
     </div>
@@ -1852,6 +2037,7 @@ function MobileMore({
 }
 
 function MobileHoldingSheet({
+  cashOnly = false,
   editing,
   demo,
   form,
@@ -1862,6 +2048,7 @@ function MobileHoldingSheet({
   onSave,
   onUpdate,
 }: {
+  cashOnly?: boolean;
   editing: boolean;
   demo: boolean;
   form: HoldingInput;
@@ -1874,8 +2061,8 @@ function MobileHoldingSheet({
 }) {
   const [mode, setMode] = useState<"manual" | "wallet">("manual");
   return (
-    <MobileSheet title={editing ? (tx(locale, "Edit holding")) : (tx(locale, "Add holding"))} onClose={onClose}>
-      {!editing && (
+    <MobileSheet title={editing ? (cashOnly ? tx(locale, "Edit cash account") : tx(locale, "Edit holding")) : (cashOnly ? tx(locale, "Add cash account") : tx(locale, "Add holding"))} onClose={onClose}>
+      {!editing && !cashOnly && (
         <div className="mb-5 grid grid-cols-2 gap-1 rounded-full border border-line bg-[var(--surface-muted)] p-1">
           <button
             aria-pressed={mode === "manual"}
@@ -1915,49 +2102,129 @@ function MobileHoldingSheet({
         />
       ) : (
       <form className="space-y-4" onSubmit={onSave}>
-        <MobileField label={tx(locale, "Asset type")}>
-          <select className="input-control w-full px-3" value={form.asset_type} onChange={(event) => onUpdate("asset_type", event.target.value as AssetType)}>
-            <option value="us_stock">{tx(locale, "US stock")}</option>
-            <option value="tw_stock">{tx(locale, "Taiwan stock")}</option>
+        {!cashOnly && <MobileField label={tx(locale, "Asset type")}>
+          <select className="input-control w-full px-3" value={form.asset_type === "crypto" ? "crypto" : "stock"} onChange={(event) => {
+            const assetType = event.target.value === "crypto" ? "crypto" : "stock";
+            onUpdate("asset_type", assetType);
+            onUpdate("symbol", "");
+            onUpdate("name", "");
+            onUpdate("market_data_id", null);
+            onUpdate("market_code", null);
+            onUpdate("exchange_code", null);
+            onUpdate("quote_currency", assetType === "crypto" ? "USD" : null);
+            onUpdate("lot_size", 1);
+            onUpdate("break_even_price", "");
+            onUpdate("gain_calculation_mode", "estimated");
+            onUpdate("average_cost", "");
+            onUpdate("cost_currency", "USD");
+          }}>
+            <option value="stock">{getDictionary(locale).stock}</option>
             <option value="crypto">{tx(locale, "Crypto")}</option>
-            <option value="cash">{tx(locale, "Cash")}</option>
           </select>
-        </MobileField>
-        <div className="grid grid-cols-2 gap-3">
-          <MobileField label={tx(locale, "Symbol")}>
-            <input className="input-control w-full px-3 uppercase" value={form.symbol} onChange={(event) => onUpdate("symbol", event.target.value)} required />
-          </MobileField>
+        </MobileField>}
+        <div className="space-y-3">
+          {form.asset_type !== "cash" && <MobileField label={tx(locale, "Symbol")}>
+            {form.asset_type === "crypto" ? (
+              <input className="input-control w-full px-3 uppercase" placeholder="BTC" value={form.symbol} onChange={(event) => onUpdate("symbol", event.target.value)} required />
+            ) : (
+              <StockSymbolSearch
+                locale={locale}
+                value={form.symbol}
+                onChange={(value) => {
+                  onUpdate("symbol", value);
+                  onUpdate("market_data_id", null);
+                  onUpdate("market_code", null);
+                  onUpdate("exchange_code", null);
+                  onUpdate("quote_currency", null);
+                  onUpdate("lot_size", 1);
+                }}
+                onSelect={(result) => {
+                  onUpdate("asset_type", result.assetType);
+                  onUpdate("symbol", result.symbol);
+                  onUpdate("name", result.description);
+                  onUpdate("market_data_id", null);
+                  onUpdate("market_code", result.market);
+                  onUpdate("exchange_code", result.exchange);
+                  onUpdate("quote_currency", result.currency);
+                  onUpdate("lot_size", result.lotSize);
+                  onUpdate("cost_currency", result.currency);
+                }}
+              />
+            )}
+          </MobileField>}
           <MobileField label={tx(locale, "Currency")}>
-            <select className="input-control w-full px-3" value={form.cost_currency} onChange={(event) => onUpdate("cost_currency", event.target.value as Currency)}>
+            <select className="input-control w-full px-3" value={form.cost_currency} onChange={(event) => {
+              const currency = event.target.value as Currency;
+              onUpdate("cost_currency", currency);
+              if (form.asset_type === "cash") {
+                onUpdate("average_cost", "1");
+                onUpdate("gain_calculation_mode", "average_cost");
+                onUpdate("cost_known", true);
+              }
+            }}>
               {supportedCurrencies.map((currency) => (
                 <option key={currency} value={currency}>{currency}</option>
               ))}
             </select>
           </MobileField>
         </div>
-        <MobileField label={tx(locale, "Name")}>
-          <input className="input-control w-full px-3" value={form.name} onChange={(event) => onUpdate("name", event.target.value)} />
-        </MobileField>
+        {(cashOnly || form.asset_type !== "cash") && <MobileField label={cashOnly ? tx(locale, "Bank name") : tx(locale, "Name")}>
+          <input className="input-control w-full px-3" required={cashOnly} value={form.name} onChange={(event) => onUpdate("name", event.target.value)} />
+        </MobileField>}
         <div className="grid grid-cols-2 gap-3">
-          <MobileField label={form.asset_type === "tw_stock" ? (tx(locale, "Lots")) : (tx(locale, "Quantity"))}>
+          <MobileField label={form.asset_type === "tw_stock" ? (tx(locale, "Lots")) : form.asset_type === "cash" ? tx(locale, "Cash balance") : (tx(locale, "Quantity"))}>
             <input className="input-control w-full px-3" inputMode="decimal" type="text" value={form.quantity} onChange={(event) => {
               const next = cleanNumber(event.target.value);
               if (next !== null) onUpdate("quantity", next);
             }} />
           </MobileField>
-          <MobileField label={tx(locale, "Average cost")}>
+          {form.asset_type !== "cash" && <MobileField label={tx(locale, "Average cost")}>
             <input className="input-control w-full px-3" inputMode="decimal" type="text" value={form.average_cost} onChange={(event) => {
               const next = cleanNumber(event.target.value);
               if (next !== null) onUpdate("average_cost", next);
             }} />
-          </MobileField>
+          </MobileField>}
         </div>
-        <label className="flex min-h-12 items-center gap-3 rounded-2xl border border-line bg-[var(--surface-muted)] px-4 text-sm text-ink">
+        {form.asset_type !== "cash" && (
+          <>
+            <GainCalculationModeSelector
+              compact
+              locale={locale}
+              value={form.gain_calculation_mode}
+              onChange={(nextMode) => {
+                onUpdate("gain_calculation_mode", nextMode);
+                if (nextMode !== "break_even") onUpdate("break_even_price", "");
+              }}
+            />
+            {form.asset_type === "tw_stock" && (
+              <p className="rounded-2xl border border-amber/25 bg-amber/10 px-3.5 py-2.5 text-xs leading-5 text-titanium">
+                {getDictionary(locale).twStockBreakEvenSuggestion}
+              </p>
+            )}
+          </>
+        )}
+        {form.asset_type !== "cash" && form.gain_calculation_mode === "break_even" && (
+          <MobileField label={getDictionary(locale).breakEvenPrice}>
+            <input
+              className="input-control w-full px-3"
+              inputMode="decimal"
+              type="text"
+              value={form.break_even_price}
+              onChange={(event) => {
+                const next = cleanNumber(event.target.value);
+                if (next !== null) onUpdate("break_even_price", next);
+              }}
+            />
+            <span className="mt-1.5 block text-[11px] leading-4 text-titanium">{getDictionary(locale).breakEvenHelp}</span>
+          </MobileField>
+        )}
+        {form.asset_type !== "cash" && <label className="flex min-h-12 items-center gap-3 rounded-2xl border border-line bg-[var(--surface-muted)] px-4 text-sm text-ink">
           <input checked={form.cost_known !== false} onChange={(event) => onUpdate("cost_known", event.target.checked)} type="checkbox" />
           {tx(locale, "Cost basis known")}
-        </label>
+        </label>}
+        {form.asset_type === "cash" && <p className="text-xs leading-5 text-titanium">{tx(locale, "Cash balances use the selected currency and are converted using live FX rates.")}</p>}
         <button className="primary-button min-h-12 w-full rounded-full font-semibold" type="submit">
-          {editing ? (tx(locale, "Save changes")) : (tx(locale, "Add holding"))}
+          {editing ? (tx(locale, "Save changes")) : (cashOnly ? tx(locale, "Add cash account") : tx(locale, "Add holding"))}
         </button>
       </form>
       )}
@@ -2014,12 +2281,15 @@ function MobileCashflowSheet({
             {categories.map((category) => <option key={category.id} value={category.id}>{tx(locale, category.en)}</option>)}
           </select>
         </MobileField>
+        {form.transaction_type === "expense" && <>
         <MobileField label={tx(locale, "Description")}>
           <input className="input-control w-full px-3" value={form.description} onChange={(event) => onUpdate("description", event.target.value)} />
         </MobileField>
+        </>}
         <MobileField label={tx(locale, "Date")}>
           <input className="input-control w-full px-3" type="date" value={form.transaction_date} onChange={(event) => onUpdate("transaction_date", event.target.value)} />
         </MobileField>
+        {form.transaction_type === "expense" && <>
         <MobileField label={tx(locale, "Payment method")}>
           <select className="input-control w-full px-3" value={form.payment_method} onChange={(event) => onUpdate("payment_method", event.target.value)}>
             <option value="">{tx(locale, "Not set")}</option>
@@ -2028,6 +2298,7 @@ function MobileCashflowSheet({
             <option value="Transfer">{tx(locale, "Bank transfer")}</option>
           </select>
         </MobileField>
+        </>}
         <button className="primary-button min-h-12 w-full rounded-full font-semibold" type="submit">
           {tx(locale, "Save transaction")}
         </button>
@@ -2037,12 +2308,14 @@ function MobileCashflowSheet({
 }
 
 function MobileRecurringSheet({
+  editing,
   form,
   locale,
   onClose,
   onSave,
   onUpdate,
 }: {
+  editing: boolean;
   form: RecurringExpenseInput;
   locale: Locale;
   onClose: () => void;
@@ -2053,7 +2326,7 @@ function MobileRecurringSheet({
   ) => void;
 }) {
   return (
-    <MobileSheet title={tx(locale, "Add recurring expense")} onClose={onClose}>
+    <MobileSheet title={editing ? tx(locale, "Edit recurring expense") : tx(locale, "Add recurring expense")} onClose={onClose}>
       <form className="space-y-4" onSubmit={onSave}>
         <MobileField label={tx(locale, "Name")}>
           <input className="input-control w-full px-3" value={form.name} onChange={(event) => onUpdate("name", event.target.value)} required />
@@ -2120,12 +2393,14 @@ function MobileRecurringSheet({
 }
 
 function MobileDebtSheet({
+  editing,
   form,
   locale,
   onClose,
   onSave,
   onUpdate,
 }: {
+  editing: boolean;
   form: DebtInput;
   locale: Locale;
   onClose: () => void;
@@ -2134,7 +2409,7 @@ function MobileDebtSheet({
 }) {
   const debtTypes: DebtType[] = ["mortgage", "car_loan", "student_loan", "credit_card", "personal_loan", "other"];
   return (
-    <MobileSheet title={tx(locale, "Add loan or debt")} onClose={onClose}>
+    <MobileSheet title={editing ? tx(locale, "Edit loan or debt") : tx(locale, "Add loan or debt")} onClose={onClose}>
       <form className="space-y-4" onSubmit={onSave}>
         <MobileField label={tx(locale, "Name")}>
           <input className="input-control w-full px-3" value={form.name} onChange={(event) => onUpdate("name", event.target.value)} required />
@@ -2188,7 +2463,6 @@ function MobileNameSheet({
   onClose: () => void;
   onSave: (name: string) => void;
 }) {
-  const zh = locale === "zh";
   const [value, setValue] = useState(portfolioName);
   return (
     <MobileSheet title={tx(locale, "Name your portfolio")} onClose={onClose}>
@@ -2211,7 +2485,7 @@ function MobileNameSheet({
         </MobileField>
         {value.trim() && (
           <p className="rounded-2xl bg-[var(--accent-soft)] px-4 py-3 text-sm font-semibold text-[var(--accent)]">
-            {zh ? `${value.trim().slice(0, 12)}的資產` : `${value.trim().slice(0, 12)}'s assets`}
+            {value.trim().slice(0, 12)}
           </p>
         )}
         <p className="text-xs leading-5 text-titanium">
@@ -2267,8 +2541,8 @@ function MobileBottomNav({
     { id: "more", icon: <Ellipsis size={20} />, label: tx(locale, "More") },
   ];
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-50 px-3 pb-[max(0.6rem,env(safe-area-inset-bottom))]">
-      <div className="mx-auto grid max-w-lg grid-cols-5 rounded-[26px] border border-line bg-[color-mix(in_srgb,var(--surface-raised)_90%,transparent)] px-1.5 py-1 shadow-[var(--shadow)] backdrop-blur-2xl">
+    <nav className="fixed inset-x-0 bottom-0 z-50 px-4 pb-[env(safe-area-inset-bottom)] pt-1.5">
+      <div className="mx-auto grid max-w-lg grid-cols-5 rounded-[26px] border border-line bg-[color-mix(in_srgb,var(--surface-raised)_94%,transparent)] px-1.5 py-1 shadow-[var(--shadow)] backdrop-blur-2xl">
         {items.map((item) => (
           <button
             aria-current={active === item.id ? "page" : undefined}
@@ -2302,12 +2576,14 @@ function MobileMetric({
   onClick,
   tone,
   value,
+  warning,
 }: {
   icon: React.ReactNode;
   label: string;
   onClick?: () => void;
   tone?: "positive" | "negative";
   value: string;
+  warning?: string;
 }) {
   const content = (
     <>
@@ -2320,7 +2596,10 @@ function MobileMetric({
         >
           {icon}
         </span>
-        {onClick && <ChevronRight className="text-titanium" size={15} />}
+        <span className="flex items-center gap-1">
+          {warning && <GainCoverageWarning label={warning} text={warning} />}
+          {onClick && <ChevronRight className="text-titanium" size={15} />}
+        </span>
       </div>
       <p className="mt-3 truncate text-[11px] font-medium text-titanium">{label}</p>
       <p className={clsx("mt-0.5 truncate text-lg font-semibold tracking-[-0.035em]", tone === "positive" ? "text-mint" : tone === "negative" ? "text-rose" : "text-ink")}>{value}</p>
@@ -2366,10 +2645,11 @@ function QuickAction({
 
 function MobileAssetRow({ holding, locale }: { holding: EnrichedHolding; locale: Locale }) {
   const money = useMoney();
+  const warning = getDictionary(locale).gainEstimateWarning;
   return (
     <div className="flex items-center justify-between gap-3 py-3">
       <div className="flex min-w-0 items-center gap-3">
-        <AssetMark assetType={holding.asset_type} symbol={holding.symbol} />
+        <AssetMark assetType={holding.asset_type} name={holding.name} symbol={holding.symbol} />
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-ink">{holding.symbol}</p>
           <p className="mt-0.5 truncate text-xs text-titanium">{holding.name}</p>
@@ -2377,15 +2657,21 @@ function MobileAssetRow({ holding, locale }: { holding: EnrichedHolding; locale:
       </div>
       <div className="shrink-0 text-right">
         <p className="text-sm font-semibold text-ink">{money.fmtUsd(holding.valueUsd)}</p>
-        <p className={clsx("mt-0.5 text-xs font-medium", holding.cost_known === false ? "text-titanium" : holding.gainUsd >= 0 ? "text-mint" : "text-rose")}>
-          {holding.cost_known === false ? (tx(locale, "Unknown cost")) : formatPercent(holding.gainPercent)}
-        </p>
+        <div className="mt-0.5 flex items-center justify-end gap-0.5">
+          <p className={clsx("text-xs font-medium", !holding.gainKnown ? "text-titanium" : holding.gainUsd >= 0 ? "text-mint" : "text-rose")}>
+            {!holding.gainKnown ? "N/A" : formatPercent(holding.gainPercent)}
+          </p>
+          {holding.gainEstimated && <GainCoverageWarning compact label={warning} text={warning} />}
+        </div>
       </div>
     </div>
   );
 }
 
-function AssetMark({ assetType, symbol }: { assetType?: AssetType; symbol: string }) {
+function AssetMark({ assetType, name, symbol }: { assetType?: AssetType; name?: string; symbol: string }) {
+  if (assetType === "cash") {
+    return <BankMark fallback={symbol} name={`${name ?? ""} ${symbol}`} />;
+  }
   const tone = assetTypeTone(assetType);
   return (
     <span
@@ -2399,6 +2685,7 @@ function AssetMark({ assetType, symbol }: { assetType?: AssetType; symbol: strin
 
 function assetTypeTone(assetType?: AssetType) {
   switch (assetType) {
+    case "stock":
     case "us_stock":
       return { solid: "#6f7ce8", soft: "rgba(111, 124, 232, 0.14)" };
     case "tw_stock":
@@ -2432,11 +2719,31 @@ function buildAllocationSegments(holdings: EnrichedHolding[]) {
   return segments;
 }
 
-function AssetFact({ label, value }: { label: string; value: string }) {
+function formatMobileGain(holding: EnrichedHolding, money: MoneyFmt) {
+  if (!holding.gainKnown) return "N/A";
+
+  const formatted = money.fmtUsd(holding.gainUsd);
+  return holding.gainUsd > 0 ? `+${formatted}` : formatted;
+}
+
+function AssetFact({
+  label,
+  tone,
+  value,
+}: {
+  label: string;
+  tone?: "positive" | "negative";
+  value: string;
+}) {
   return (
     <div className="min-w-0">
       <p className="truncate text-[10px] text-titanium">{label}</p>
-      <p className="mt-1 truncate font-semibold text-ink">{value}</p>
+      <p className={clsx(
+        "mt-1 truncate font-semibold tabular-nums",
+        tone === "positive" ? "text-mint" : tone === "negative" ? "text-rose" : "text-ink",
+      )}>
+        {value}
+      </p>
     </div>
   );
 }
@@ -2521,10 +2828,6 @@ function getTransactionBuckets(transactions: CashflowTransaction[]) {
     result[transaction.transaction_type][transaction.currency] += transaction.amount;
   });
   return result;
-}
-
-function formatBuckets(money: MoneyFmt, values: Record<Currency, number>) {
-  return money.fmtUsd(currencyBucketsToUsd(values, money.fx));
 }
 
 function formatQuantity(value: number) {

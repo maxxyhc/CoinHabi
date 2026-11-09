@@ -5,6 +5,7 @@ import { arbitrum, base, bitcoin, mainnet, optimism, polygon, solana } from "@re
 import { BitcoinAdapter } from "@reown/appkit-adapter-bitcoin";
 import { SolanaAdapter } from "@reown/appkit-adapter-solana";
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
+import { baseAccount, coinbaseWallet } from "@wagmi/connectors";
 
 export const reownProjectId = process.env.NEXT_PUBLIC_REOWN_PROJECT_ID?.trim() ?? "";
 export const isWalletConnectConfigured = Boolean(reownProjectId);
@@ -22,7 +23,14 @@ if (isWalletConnectConfigured) {
     solana,
     bitcoin,
   ];
-  const wagmiAdapter = new WagmiAdapter({ networks: evmNetworks, projectId: reownProjectId });
+  // AppKit otherwise adds these connectors with Coinbase telemetry on; its blocked fetch
+  // surfaces as a "Failed to fetch" dev overlay. Supplying them ourselves stops the auto-add.
+  const telemetryOff = { preference: { telemetry: false } };
+  const wagmiAdapter = new WagmiAdapter({
+    networks: evmNetworks,
+    projectId: reownProjectId,
+    connectors: [baseAccount({ appName: "Coinhabi", ...telemetryOff }), coinbaseWallet({ appName: "Coinhabi", ...telemetryOff })],
+  });
 
   createAppKit({
     adapters: [wagmiAdapter, new SolanaAdapter(), new BitcoinAdapter()],

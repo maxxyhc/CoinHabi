@@ -14,27 +14,36 @@ export function AuthForm() {
   const searchParams = useSearchParams();
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const [locale, setLocale] = useState<Locale>("zh");
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState<"error" | "success">("error");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const isNotAllowed = searchParams.get("error") === "not_allowed";
   const confirmationFailed = searchParams.get("error") === "confirmation_failed";
 
   useEffect(() => {
     const storedLocale = window.localStorage.getItem("locale");
     if (isLocale(storedLocale)) setLocale(storedLocale);
+    const rememberedEmail = window.localStorage.getItem("auth:rememberedEmail");
+    if (rememberedEmail) {
+      setEmail((current) => current || rememberedEmail);
+      setRememberMe(true);
+    }
   }, []);
 
   useEffect(() => {
-    if (isNotAllowed) {
-      supabase?.auth.signOut();
-    }
-  }, [isNotAllowed, supabase]);
+    if (!supabase) return;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        router.replace("/reset-password");
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [router, supabase]);
 
   function changeLocale(nextLocale: Locale) {
     setLocale(nextLocale);
@@ -57,6 +66,22 @@ export function AuthForm() {
     }
 
     setLoading(true);
+    if (mode === "forgot") {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      setLoading(false);
+
+      if (error) {
+        setMessage(error.message);
+        return;
+      }
+
+      setMessageType("success");
+      setMessage(tx(locale, "Reset link sent. Check your email inbox."));
+      return;
+    }
+
     if (mode === "signup") {
       const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
@@ -96,11 +121,17 @@ export function AuthForm() {
       return;
     }
 
+    if (rememberMe) {
+      window.localStorage.setItem("auth:rememberedEmail", email.trim());
+    } else {
+      window.localStorage.removeItem("auth:rememberedEmail");
+    }
+
     router.push("/");
     router.refresh();
   }
 
-  function changeMode(nextMode: "signin" | "signup") {
+  function changeMode(nextMode: "signin" | "signup" | "forgot") {
     setMode(nextMode);
     setMessage("");
     setMessageType("error");
@@ -111,7 +142,7 @@ export function AuthForm() {
   const heroItems = ["Manual holdings", "Address tracking", "Live prices"];
 
   return (
-    <main className="min-h-screen px-4 py-5 sm:px-8 sm:py-8">
+    <main className="min-h-screen px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(1.25rem,calc(env(safe-area-inset-top)+0.5rem))] sm:px-8 sm:pb-8 sm:pt-[max(2rem,calc(env(safe-area-inset-top)+0.5rem))]">
       <header className="mx-auto flex max-w-6xl items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="primary-button flex h-11 w-11 items-center justify-center rounded-[16px]">
@@ -143,7 +174,7 @@ export function AuthForm() {
       <section className="mx-auto grid min-h-[calc(100vh-96px)] max-w-6xl items-center gap-12 py-10 lg:grid-cols-[1fr_440px]">
         <div className="hidden max-w-xl lg:block">
           <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-line bg-panel/80 px-3 py-2 text-sm text-titanium shadow-sm">
-            <ShieldCheck className="text-mint" size={17} />
+            <ShieldCheck className="text-[var(--positive)]" size={17} />
             {tx(locale, "Watch-only wallet tracking")}
           </div>
           <h1 className="text-5xl font-semibold leading-[1.05] tracking-[-0.055em] text-ink xl:text-6xl">
@@ -170,12 +201,14 @@ export function AuthForm() {
             <div>
               <p className="text-sm font-medium" style={{ color: "var(--accent)" }}>{tx(locale, "Private account")}</p>
               <h2 className="mt-2 text-3xl font-semibold tracking-[-0.025em] text-ink">
-                {tx(locale, mode === "signin" ? "Welcome back" : "Create your account")}
+                {tx(locale, mode === "signin" ? "Welcome back" : mode === "signup" ? "Create your account" : "Reset your password")}
               </h2>
               <p className="mt-2 text-sm leading-6 text-titanium">
                 {tx(locale, mode === "signin"
                   ? "Sign in to view portfolio holdings and wallet sync status."
-                  : "Create a separate account with email. Your data stays separated from other users.")}
+                  : mode === "signup"
+                    ? "Create a separate account with email. Your data stays separated from other users."
+                    : "Enter your account email and we'll send you a reset link.")}
               </p>
             </div>
 
@@ -196,19 +229,17 @@ export function AuthForm() {
               ))}
             </div>
 
-            {(message || isNotAllowed || confirmationFailed) && (
+            {(message || confirmationFailed) && (
               <div
-                role={messageType === "error" || isNotAllowed || confirmationFailed ? "alert" : "status"}
+                role={messageType === "error" || confirmationFailed ? "alert" : "status"}
                 className={clsx(
                   "apple-card-sm border p-4 text-sm",
-                  messageType === "success" && !isNotAllowed && !confirmationFailed
+                  messageType === "success" && !confirmationFailed
                     ? "border-mint/30 bg-mint/10 text-mint"
                     : "border-rose/30 bg-rose/10 text-rose",
                 )}
               >
-                {isNotAllowed
-                  ? tx(locale, "This email is not allowed yet.")
-                  : confirmationFailed
+                {confirmationFailed
                     ? tx(locale, "Email verification link is invalid or expired. Please sign up again.")
                     : message}
               </div>
@@ -226,6 +257,7 @@ export function AuthForm() {
               />
             </label>
 
+            {mode !== "forgot" && (
             <label className="block">
               <span className="text-sm font-medium text-ink">{tx(locale, "Password")}</span>
               <span className="relative mt-2 block">
@@ -247,6 +279,28 @@ export function AuthForm() {
                 </button>
               </span>
             </label>
+            )}
+
+            {mode === "signin" && (
+              <div className="flex items-center justify-between gap-3">
+                <label className="flex cursor-pointer items-center gap-2 text-sm text-titanium">
+                  <input
+                    checked={rememberMe}
+                    className="h-4 w-4"
+                    onChange={(event) => setRememberMe(event.target.checked)}
+                    type="checkbox"
+                  />
+                  {tx(locale, "Remember me")}
+                </label>
+                <button
+                  className="focus-ring rounded-lg text-sm font-medium text-[var(--accent)] hover:underline"
+                  onClick={() => changeMode("forgot")}
+                  type="button"
+                >
+                  {tx(locale, "Forgot password?")}
+                </button>
+              </div>
+            )}
 
             {mode === "signup" && (
               <label className="block">
@@ -268,14 +322,18 @@ export function AuthForm() {
               type="submit"
             >
               {tx(locale, loading
-                ? mode === "signin" ? "Signing in..." : "Creating..."
-                : mode === "signin" ? "Sign in" : "Create account")}
+                ? mode === "signin" ? "Signing in..." : mode === "signup" ? "Creating..." : "Sending..."
+                : mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Send reset link")}
               <ArrowRight size={18} />
             </button>
-            {mode === "signup" && (
-              <p className="text-xs leading-5 text-titanium">
-                {tx(locale, "If this site uses a private allowlist, an admin still needs to authorize your email after verification.")}
-              </p>
+            {mode === "forgot" && (
+              <button
+                className="focus-ring mx-auto block rounded-lg text-sm font-medium text-titanium hover:text-ink"
+                onClick={() => changeMode("signin")}
+                type="button"
+              >
+                {tx(locale, "Back to sign in")}
+              </button>
             )}
             <div className="border-t border-line pt-5">
               <div className="flex gap-3 text-xs leading-5 text-titanium">

@@ -1,9 +1,27 @@
-export type AssetType = "crypto" | "us_stock" | "tw_stock" | "cash";
+export type AssetType = "crypto" | "stock" | "us_stock" | "tw_stock" | "cash";
+export type GainCalculationMode = "average_cost" | "break_even" | "estimated";
 export type Locale = "en" | "zh" | "ja" | "ko" | "es";
-export const supportedCurrencies = ["USD", "TWD", "EUR", "JPY", "KRW"] as const;
+export const supportedCurrencies = [
+  "USD",
+  "TWD",
+  "EUR",
+  "JPY",
+  "KRW",
+  "HKD",
+  "GBP",
+  "CAD",
+  "AUD",
+  "SGD",
+  "CNY",
+  "CHF",
+  "INR",
+  "SAR",
+] as const;
 export type Currency = (typeof supportedCurrencies)[number];
 
+export const totalBudgetCategory = "total";
 export type CashflowType = "income" | "expense";
+export type InvestmentTransactionType = "opening" | "buy" | "sell";
 export type RecurringFrequency = "monthly" | "yearly";
 export type SubscriptionUsageStatus = "active" | "rarely_used" | "consider_canceling";
 export type DebtType = "mortgage" | "car_loan" | "student_loan" | "credit_card" | "personal_loan" | "other";
@@ -19,9 +37,15 @@ export type Holding = {
   name: string;
   quantity: number;
   average_cost: number;
+  break_even_price: number | null;
+  gain_calculation_mode: GainCalculationMode;
   cost_currency: Currency;
   notes: string | null;
   market_data_id?: string | null;
+  market_code?: string | null;
+  exchange_code?: string | null;
+  quote_currency?: string | null;
+  lot_size?: number | null;
   source_kind?: "manual" | "wallet";
   source_label?: string | null;
   source_account_id?: string | null;
@@ -37,9 +61,56 @@ export type HoldingInput = {
   name: string;
   quantity: string;
   average_cost: string;
+  break_even_price: string;
+  gain_calculation_mode: GainCalculationMode;
   cost_currency: Currency;
   market_data_id?: string | null;
+  market_code?: string | null;
+  exchange_code?: string | null;
+  quote_currency?: string | null;
+  lot_size?: number | null;
   cost_known?: boolean;
+};
+
+export type InvestmentTransaction = {
+  id: string;
+  user_id: string;
+  holding_id: string | null;
+  asset_type: Exclude<AssetType, "cash">;
+  symbol: string;
+  name: string;
+  transaction_type: InvestmentTransactionType;
+  quantity: number;
+  price_per_unit: number | null;
+  fees: number;
+  currency: Currency;
+  cost_basis: number | null;
+  proceeds: number | null;
+  realized_gain: number | null;
+  transaction_date: string;
+  notes: string | null;
+  created_at: string;
+};
+
+export type InvestmentSaleInput = {
+  holdingId: string;
+  quantity: number;
+  pricePerUnit: number;
+  fees: number;
+  transactionDate: string;
+  notes: string;
+};
+
+export type InvestmentPerformance = {
+  realizedGainUsd: number;
+  unrealizedGainUsd: number;
+  cumulativeGainUsd: number;
+  trackedCostUsd: number;
+  cumulativeReturnPercent: number;
+  hasPerformanceData: boolean;
+  knownSaleCount: number;
+  saleCount: number;
+  startedAt: string | null;
 };
 
 export type CashflowTransaction = {
@@ -159,6 +230,11 @@ export type SymbolSearchResult = {
   description: string;
   displaySymbol: string;
   type: string;
+  assetType: Extract<AssetType, "stock" | "us_stock" | "tw_stock">;
+  market: string;
+  exchange: string;
+  currency: Currency;
+  lotSize: number;
 };
 
 export type WalletAccount = {
@@ -217,6 +293,9 @@ export type MarketQuote = {
 export type MarketResponse = {
   quotes: Record<string, MarketQuote>;
   fx: {
+    status?: "fresh" | "cached";
+    updatedAt?: string;
+    source?: string;
     usdToTwd: number;
     twdToUsd: number;
     usdToEur: number;
@@ -225,6 +304,7 @@ export type MarketResponse = {
     jpyToUsd: number;
     usdToKrw: number;
     krwToUsd: number;
+    usdRates: Partial<Record<Currency, number>>;
   };
   refreshedAt: string;
 };
@@ -233,6 +313,10 @@ export type EnrichedHolding = Holding & {
   quote?: MarketQuote;
   valueUsd: number;
   costBasisUsd: number;
+  breakEvenKnown: boolean;
+  gainConfirmed: boolean;
+  gainKnown: boolean;
+  gainEstimated: boolean;
   gainUsd: number;
   gainPercent: number;
   dayChangeUsd: number;

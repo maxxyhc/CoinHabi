@@ -7,6 +7,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { WalletConnect } from "@/components/wallet-connect";
 import type { Holding, Locale, WalletAccount, WalletAddressKind, WalletChain, WalletScanResponse } from "@/lib/types";
 import { tx } from "@/lib/i18n";
+import { resolveGainCalculationMode } from "@/lib/calculations";
 
 const chainLabels: Record<WalletChain, string> = {
   ethereum: "Ethereum / EVM",
@@ -146,15 +147,18 @@ export function WalletTracker({
       const assets = result.assets.filter((asset) => asset.quantity > 0 || asset.assetId === account.chain);
       const { data: existing } = await supabase
         .from("holdings")
-        .select("id, source_asset_id, average_cost, cost_currency, cost_known")
+        .select("id, source_asset_id, average_cost, break_even_price, gain_calculation_mode, cost_currency, cost_known")
         .eq("source_account_id", account.id);
       const existingByAsset = new Map(
-        ((existing ?? []) as Pick<Holding, "id" | "source_asset_id" | "average_cost" | "cost_currency" | "cost_known">[])
+        ((existing ?? []) as Pick<Holding, "id" | "source_asset_id" | "average_cost" | "break_even_price" | "gain_calculation_mode" | "cost_currency" | "cost_known">[])
           .map((item) => [item.source_asset_id, item]),
       );
       if (assets.length) {
         const payload = assets.map((asset) => {
           const savedCost = existingByAsset.get(asset.assetId);
+          const gainCalculationMode = savedCost
+            ? resolveGainCalculationMode(savedCost)
+            : "estimated";
           return {
             user_id: userId,
             asset_type: "crypto" as const,
@@ -162,6 +166,14 @@ export function WalletTracker({
             name: asset.name,
             quantity: asset.quantity,
             average_cost: savedCost?.average_cost ?? 0,
+            break_even_price: gainCalculationMode === "break_even" &&
+              savedCost?.break_even_price !== null &&
+              savedCost?.break_even_price !== undefined &&
+              Number.isFinite(savedCost.break_even_price) &&
+              savedCost.break_even_price > 0
+              ? savedCost.break_even_price
+              : null,
+            gain_calculation_mode: gainCalculationMode,
             cost_currency: savedCost?.cost_currency ?? ("USD" as const),
             notes: null,
             market_data_id: asset.marketDataId ?? null,

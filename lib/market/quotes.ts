@@ -1,4 +1,6 @@
+import { fetchFxRates } from "@/lib/market/fx";
 import { fetchContractQuotes, fetchCryptoQuotes } from "@/lib/market/coingecko";
+import { supportedCurrencies } from "@/lib/types";
 import type { Currency, Holding, MarketQuote, MarketResponse } from "@/lib/types";
 
 type YahooResult = {
@@ -20,47 +22,9 @@ type YahooResult = {
   };
 };
 
-export async function fetchUsdTwdRate() {
-  try {
-    const response = await fetch("https://open.er-api.com/v6/latest/USD", {
-      next: { revalidate: 60 * 30 },
-    });
-    if (!response.ok) {
-      throw new Error("FX request failed");
-    }
-    const data = (await response.json()) as { rates?: Record<string, number> };
-    const usdToTwd = data.rates?.TWD;
-    const usdToEur = data.rates?.EUR;
-    const usdToJpy = data.rates?.JPY;
-    const usdToKrw = data.rates?.KRW;
-    if (!usdToTwd || !usdToEur || !usdToJpy || !usdToKrw) {
-      throw new Error("Missing TWD rate");
-    }
-    return {
-      usdToTwd,
-      twdToUsd: 1 / usdToTwd,
-      usdToEur,
-      eurToUsd: 1 / usdToEur,
-      usdToJpy,
-      jpyToUsd: 1 / usdToJpy,
-      usdToKrw,
-      krwToUsd: 1 / usdToKrw,
-    };
-  } catch {
-    return {
-      usdToTwd: 32,
-      twdToUsd: 1 / 32,
-      usdToEur: 0.92,
-      eurToUsd: 1 / 0.92,
-      usdToJpy: 157,
-      jpyToUsd: 1 / 157,
-      usdToKrw: 1380,
-      krwToUsd: 1 / 1380,
-    };
-  }
-}
+export const fetchUsdTwdRate = fetchFxRates;
 
-async function fetchYahooQuote(symbol: string, twdToUsd: number) {
+async function fetchYahooQuote(symbol: string, fx: Awaited<ReturnType<typeof fetchUsdTwdRate>>) {
   try {
     const response = await fetch(
       `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=2d&interval=1d`,
@@ -81,8 +45,10 @@ async function fetchYahooQuote(symbol: string, twdToUsd: number) {
     const previousClose = closes && closes.length > 1 ? closes[closes.length - 2] : meta?.chartPreviousClose;
     const dayChangePercent = previousClose ? ((price - previousClose) / previousClose) * 100 : 0;
     const isTaiwanSymbol = symbol.endsWith(".TW") || symbol.endsWith(".TWO");
-    const nativeCurrency = (isTaiwanSymbol ? "TWD" : meta?.currency ?? "USD") as Currency;
-    const priceUsd = nativeCurrency === "TWD" ? price * twdToUsd : price;
+    const nativeCurrency = (isTaiwanSymbol ? "TWD" : meta?.currency ?? "USD").toUpperCase();
+    const usdRate = nativeCurrency === "USD" ? 1 : fx.usdRates[nativeCurrency as Currency];
+    if (!usdRate || usdRate <= 0) return null;
+    const priceUsd = price / usdRate;
 
     return {
       symbol,
@@ -97,20 +63,20 @@ async function fetchYahooQuote(symbol: string, twdToUsd: number) {
   }
 }
 
-export async function getMarketSnapshot(holdings: Holding[]): Promise<MarketResponse> {
-  const fx = await fetchUsdTwdRate();
+export async function getMarketSnapshot(holdings: Holding[], cachedFx?: unknown): Promise<MarketResponse> {
+  const fx = await fetchUsdTwdRate(cachedFx);
   const { twdToUsd, usdToTwd } = fx;
 
   const uniqueSymbols = [...new Set(holdings.map((holding) => holding.symbol.toUpperCase()))];
   const cryptoHoldings = holdings.filter((holding) => holding.asset_type === "crypto");
   const yahooSymbols = uniqueSymbols.filter((symbol) =>
-    holdings.some((holding) => ["us_stock", "tw_stock"].includes(holding.asset_type) && holding.symbol.toUpperCase() === symbol),
+    holdings.some((holding) => ["stock", "us_stock", "tw_stock"].includes(holding.asset_type) && holding.symbol.toUpperCase() === symbol),
   );
 
   const [cryptoQuotes, contractQuotes, stockQuotes] = await Promise.all([
     fetchCryptoQuotes(cryptoHoldings),
     fetchContractQuotes(cryptoHoldings),
-    Promise.all(yahooSymbols.map((symbol) => fetchYahooQuote(symbol, twdToUsd))),
+    Promise.all(yahooSymbols.map((symbol) => fetchYahooQuote(symbol, fx))),
   ]);
 
   const quotes = stockQuotes.reduce<Record<string, MarketQuote>>((acc, quote) => {
@@ -123,13 +89,10 @@ export async function getMarketSnapshot(holdings: Holding[]): Promise<MarketResp
   for (const holding of holdings) {
     if (holding.asset_type === "cash") {
       const symbol = holding.symbol.toUpperCase();
-      const cashPriceUsd =
-        symbol === "TWD" ? twdToUsd :
-        symbol === "EUR" ? fx.eurToUsd :
-        symbol === "JPY" ? fx.jpyToUsd :
-        symbol === "KRW" ? fx.krwToUsd :
-        1;
-      const cashCurrency = (["USD", "TWD", "EUR", "JPY", "KRW"].includes(symbol) ? symbol : "USD") as Currency;
+      const usdRate = fx.usdRates[symbol as Currency];
+      if (!usdRate || usdRate <= 0) continue;
+      const cashPriceUsd = 1 / usdRate;
+      const cashCurrency = ((supportedCurrencies as readonly string[]).includes(symbol) ? symbol : "USD") as Currency;
       quotes[symbol] = {
         symbol,
         price: 1,

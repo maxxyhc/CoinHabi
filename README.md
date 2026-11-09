@@ -2,8 +2,8 @@
 
 A private, USD-first personal finance workspace. Track investments across US
 stocks, Taiwan stocks, crypto, cash, and watch-only public wallet addresses —
-then layer on cashflow, recurring bills, debts, budgets, and a gamified
-financial-health view. Works on desktop and mobile, in five languages.
+then layer on cashflow, recurring bills, debts, budgets, and financial-health
+guidance. Works on desktop and mobile, in five languages.
 
 > Not investment advice. Prices come from free public endpoints and are for
 > personal tracking only.
@@ -25,8 +25,7 @@ financial-health view. Works on desktop and mobile, in five languages.
 - Recurring expenses and subscriptions (monthly/yearly, annualized cost)
 - Debts/loans with minimum payments and payoff tracking
 - Monthly budgets per category
-- Financial-health score (net worth, savings rate, fixed-cost pressure,
-  debt-to-income) surfaced as a gamified pet on mobile
+- Private financial-health guidance based on cashflow, debt, budgets, and data quality
 
 **Experience**
 - Responsive desktop layout and a dedicated mobile UI
@@ -80,6 +79,12 @@ financial-health view. Works on desktop and mobile, in five languages.
    | `0008_debts.sql` | Debts/loans |
    | `0009_monthly_budgets.sql` | Per-category budgets |
    | `0010_user_settings.sql` | Cross-device settings (portfolio name) |
+   | `0011_multi_currency_total_budget.sql` | Multi-currency total budgets |
+   | `0012_display_currency.sql` | Cross-device display currency |
+   | `0014_holding_break_even_price.sql` | Broker break-even price for net P/L calculations |
+   | `0015_holding_gain_calculation_mode.sql` | Confirmed or estimated holding gain calculation mode |
+   | `0017_investment_transactions.sql` | Investment history, realized P/L, and atomic sale recording |
+   | `0018_global_stock_markets.sql` | Global stock market metadata, currencies, and lot sizes |
 
 4. Start the app:
 
@@ -106,8 +111,9 @@ financial-health view. Works on desktop and mobile, in five languages.
 - Keep email confirmation enabled for public registration. The app accepts both
   token-hash and PKCE confirmation callbacks at `/auth/confirm`.
 - Enable RLS on all user-data tables and keep `Enable Data API` on.
-- Use the optional `ALLOWED_EMAILS` allowlist for a private beta; leave it blank
-  to allow every authenticated user. The legacy `ALLOWED_EMAIL` is still read.
+- To enable self-service account deletion, add `SUPABASE_SERVICE_ROLE_KEY` to
+  your local environment and Vercel environment variables. This server-only
+  secret is never exposed to the browser.
 
 ## Watch-only wallet tracking
 
@@ -163,3 +169,16 @@ not auto-deploy; ship with the CLI instead:
 ```bash
 npx vercel --prod
 ```
+
+## Exchange-rate reliability
+
+Live conversions require a complete, validated USD-based rate set from ExchangeRate-API.
+The app shows the provider's update time (not the portfolio refresh time). Rates older
+than 36 hours or reused after a failed request are explicitly marked as estimates.
+The latest successful rates are kept in server memory and in this browser's local
+storage (`coinhabi.fx.v1`), so they can be reused after a server cold start. Browser
+storage contains only public exchange rates, not holdings or credentials; it is not
+shared across devices and can be cleared by the browser. If no valid rates are
+available, the app shows a retry screen instead of portfolio totals.
+
+Run exchange-rate failure/recovery checks with `node --test tests/fx.test.mjs`.
