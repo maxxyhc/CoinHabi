@@ -1,7 +1,10 @@
 .git
 .codex
 .agents
+.claude
 .pnpm-store
+.tmp-reasoning-edit
+.tmp-reasoning-review
 .next
 node_modules
 open-design

@@ -8,9 +8,12 @@ export async function middleware(request: NextRequest) {
   const isLogin = request.nextUrl.pathname.startsWith("/login");
   const isDemo = request.nextUrl.pathname.startsWith("/demo");
   const isAuthConfirmation = request.nextUrl.pathname.startsWith("/auth/confirm");
+  const isResetPassword = request.nextUrl.pathname.startsWith("/reset-password");
   const isApi = request.nextUrl.pathname.startsWith("/api/");
+  // Cron routes authenticate with CRON_SECRET, not a user session.
+  const isCron = request.nextUrl.pathname.startsWith("/api/cron/");
 
-  if (isDemo || isAuthConfirmation) {
+  if (isDemo || isAuthConfirmation || isResetPassword || isCron) {
     return response;
   }
 
@@ -51,17 +54,6 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser(accessToken);
 
-  const allowedEmails = [
-    ...(process.env.ALLOWED_EMAILS ?? "").split(","),
-    process.env.ALLOWED_EMAIL ?? "",
-  ]
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
-  const userEmail = user?.email?.trim().toLowerCase();
-  const isAllowed =
-    allowedEmails.length === 0 ||
-    Boolean(userEmail && allowedEmails.includes(userEmail));
-
   if (!user && !isLogin) {
     if (isApi) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
@@ -71,17 +63,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (user && !isAllowed && !isLogin) {
-    if (isApi) {
-      return NextResponse.json({ error: "This account is not allowed to use the API." }, { status: 403 });
-    }
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    url.searchParams.set("error", "not_allowed");
-    return NextResponse.redirect(url);
-  }
-
-  if (user && isLogin && isAllowed) {
+  if (user && isLogin) {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     return NextResponse.redirect(url);

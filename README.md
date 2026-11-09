@@ -1,16 +1,51 @@
-# Financial Tracker App
+# Coinhabi
 
-A private portfolio dashboard for tracking crypto, Taiwan stocks, US stocks, cash, and watch-only public wallet addresses in a USD-first view.
+A private, USD-first personal finance workspace. Track investments across US
+stocks, Taiwan stocks, crypto, cash, and watch-only public wallet addresses —
+then layer on cashflow, recurring bills, debts, budgets, and financial-health
+guidance. Works on desktop and mobile, in five languages.
+
+> Not investment advice. Prices come from free public endpoints and are for
+> personal tracking only.
+
+## Features
+
+**Portfolio**
+- US stocks, Taiwan stocks, crypto, and cash in one USD-normalized view
+- Manual holdings plus watch-only wallet tracking (public addresses only)
+- Live prices: Yahoo Finance (stocks), CoinGecko (crypto), FX rate for TWD
+- Symbol search for stocks (Finnhub) and crypto (CoinGecko)
+- Allocation donut, leaders/laggards, and a "today's movers" panel that breaks
+  the daily change down per holding
+- Bulk import holdings from an Excel/CSV file (downloadable template,
+  auto column detection, editable preview before saving)
+
+**Cashflow & planning**
+- Income/expense tracking with a monthly calendar and spending-by-category
+- Recurring expenses and subscriptions (monthly/yearly, annualized cost)
+- Debts/loans with minimum payments and payoff tracking
+- Monthly budgets per category
+- Private financial-health guidance based on cashflow, debt, budgets, and data quality
+
+**Experience**
+- Responsive desktop layout and a dedicated mobile UI
+- Light/dark theme
+- Five languages: English, 中文, 日本語, 한국어, Español (selectable on the
+  login page and in-app)
+- Custom portfolio name synced across devices
+- Read-only demo at `/demo` (no login required)
+- Optional private-beta email allowlist
 
 ## Stack
 
-- Next.js + TypeScript
+- Next.js (App Router) + TypeScript
 - Tailwind CSS
-- Supabase Auth + PostgreSQL
-- Supabase RLS for per-user data isolation
-- Free market data endpoints through a server route
+- Supabase Auth + PostgreSQL with Row Level Security for per-user isolation
+- Recharts for charts, SheetJS (`xlsx`) for import
+- Reown AppKit + wagmi/viem for read-only wallet connection
+- Capacitor for the iOS/Android shells
 
-## Local Setup
+## Local setup
 
 1. Install dependencies:
 
@@ -23,19 +58,33 @@ A private portfolio dashboard for tracking crypto, Taiwan stocks, US stocks, cas
    ```bash
    NEXT_PUBLIC_SUPABASE_URL=...
    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
-   # Optional: comma-separated private-beta allowlist.
+   # Optional: comma-separated private-beta allowlist. Blank = any signed-in user.
    ALLOWED_EMAILS=your@email.com,friend@email.com
    FINNHUB_API_KEY=...
    NEXT_PUBLIC_REOWN_PROJECT_ID=...
-   NEXT_PUBLIC_APP_URL=http://localhost:3021
+   NEXT_PUBLIC_APP_URL=http://localhost:3000
    ```
 
-3. Run the Supabase SQL migrations in order:
+3. Run the Supabase SQL migrations in order (`supabase/migrations/`):
 
-   - `supabase/migrations/0001_initial_schema.sql`
-   - `supabase/migrations/0002_wallet_tracking.sql`
-   - `supabase/migrations/0003_evm_networks.sql`
-   - `supabase/migrations/0004_bitcoin_xpub_tracking.sql`
+   | File | Adds |
+   |------|------|
+   | `0001_initial_schema.sql` | Holdings table + RLS |
+   | `0002_wallet_tracking.sql` | Wallet accounts, holding source columns |
+   | `0003_evm_networks.sql` | Extra EVM chains |
+   | `0004_bitcoin_xpub_tracking.sql` | Bitcoin xpub support |
+   | `0005_cashflow_transactions.sql` | Income/expense records |
+   | `0006_recurring_expenses.sql` | Recurring bills |
+   | `0007_subscription_management.sql` | Subscription fields |
+   | `0008_debts.sql` | Debts/loans |
+   | `0009_monthly_budgets.sql` | Per-category budgets |
+   | `0010_user_settings.sql` | Cross-device settings (portfolio name) |
+   | `0011_multi_currency_total_budget.sql` | Multi-currency total budgets |
+   | `0012_display_currency.sql` | Cross-device display currency |
+   | `0014_holding_break_even_price.sql` | Broker break-even price for net P/L calculations |
+   | `0015_holding_gain_calculation_mode.sql` | Confirmed or estimated holding gain calculation mode |
+   | `0017_investment_transactions.sql` | Investment history, realized P/L, and atomic sale recording |
+   | `0018_global_stock_markets.sql` | Global stock market metadata, currencies, and lot sizes |
 
 4. Start the app:
 
@@ -43,69 +92,93 @@ A private portfolio dashboard for tracking crypto, Taiwan stocks, US stocks, cas
    npm run dev
    ```
 
-## Supabase Notes
+## Scripts
+
+| Command | Purpose |
+|---------|---------|
+| `npm run dev` | Start the dev server |
+| `npm run build` | Production build |
+| `npm run lint` | ESLint |
+| `npm run i18n:check` | Check for missing translation keys |
+| `npm run mobile:sync` | `cap sync` the web build into the native shells |
+| `npm run mobile:ios` / `mobile:android` | Open the native projects |
+
+## Supabase notes
 
 - Use Supabase Auth with email + password.
-- Set the Auth `Site URL` to the production website and add
+- Set the Auth `Site URL` to your production URL and add
   `https://your-domain.example/auth/confirm` to the allowed redirect URLs.
 - Keep email confirmation enabled for public registration. The app accepts both
   token-hash and PKCE confirmation callbacks at `/auth/confirm`.
-- Enable RLS on user data tables.
-- Keep `Enable Data API` enabled.
-- Disable `Automatically expose new tables` if you want to manage API access manually.
-- `Enable automatic RLS` is recommended for future tables.
-
-Use the optional comma-separated `ALLOWED_EMAILS` allowlist for a private beta. Leave it blank to allow every authenticated Supabase user. The legacy `ALLOWED_EMAIL` variable remains supported for existing deployments.
+- Enable RLS on all user-data tables and keep `Enable Data API` on.
+- To enable self-service account deletion, add `SUPABASE_SERVICE_ROLE_KEY` to
+  your local environment and Vercel environment variables. This server-only
+  secret is never exposed to the browser.
 
 ## Watch-only wallet tracking
 
-- Ethereum, Base, Arbitrum One, OP Mainnet, and Polygon PoS: native coin and ERC-20 balances through Blockscout
-- Bitcoin: BTC balance through mempool.space; supports both a single address and xpub/ypub/zpub account tracking
-- Solana: SOL and SPL balances through Solana RPC
-- Cardano: ADA and native assets through Koios; `stake1...` is recommended over one `addr1...` address
-- Only public addresses are accepted. Seed phrases, private keys, and PINs are never requested or stored.
+Only public addresses are accepted — seed phrases, private keys, and PINs are
+never requested or stored.
 
-Optional endpoint overrides: `ETHEREUM_BLOCKSCOUT_URL`, `BASE_BLOCKSCOUT_URL`, `ARBITRUM_BLOCKSCOUT_URL`, `OPTIMISM_BLOCKSCOUT_URL`, `POLYGON_BLOCKSCOUT_URL`, `BITCOIN_API_URL`, `SOLANA_RPC_URL`, and `CARDANO_KOIOS_URL`.
+- **EVM** (Ethereum, Base, Arbitrum One, OP Mainnet, Polygon PoS): native coin
+  and ERC-20 balances via Blockscout
+- **Bitcoin**: balance via mempool.space; supports a single address or
+  xpub/ypub/zpub account tracking (receive + change derivation, gap limit 20)
+- **Solana**: SOL and SPL balances via Solana RPC
+- **Cardano**: ADA and native assets via Koios (`stake1...` is more complete
+  than a single `addr1...`)
 
-## Wallet connection
+Optional endpoint overrides: `ETHEREUM_BLOCKSCOUT_URL`, `BASE_BLOCKSCOUT_URL`,
+`ARBITRUM_BLOCKSCOUT_URL`, `OPTIMISM_BLOCKSCOUT_URL`, `POLYGON_BLOCKSCOUT_URL`,
+`BITCOIN_API_URL`, `SOLANA_RPC_URL`, `CARDANO_KOIOS_URL`.
 
-The address tracking page can connect Ethereum, Base, Arbitrum One, OP Mainnet, Polygon PoS, Solana, and Bitcoin wallets through Reown AppKit. The connection is read-only: the app imports the public address and still requires the user to confirm before saving it as a tracked account.
+### Wallet connection (Reown AppKit)
+
+The address-tracking page can connect EVM, Solana, and Bitcoin wallets to import
+a public address read-only; the user still confirms before it is saved.
 
 1. Create a free project at [Reown Cloud](https://cloud.reown.com/).
-2. Copy the Project ID into `NEXT_PUBLIC_REOWN_PROJECT_ID` in `.env.local`.
-3. Set `NEXT_PUBLIC_APP_URL` to the local or deployed site URL.
-4. Restart the app after changing environment variables.
+2. Put the Project ID in `NEXT_PUBLIC_REOWN_PROJECT_ID`.
+3. Set `NEXT_PUBLIC_APP_URL` to the local or deployed URL, then restart.
 
-Bitcoin wallet connections currently import the single address supplied by the wallet. For a more complete BTC account view, manually add the account `xpub`, `ypub`, or `zpub`; the app derives receive and change addresses with a gap limit of 20. Cardano remains available through manual `stake1...` or `addr1...` entry.
+## Import holdings from Excel
 
-## Capacitor mobile app
+On the desktop **Holdings → Excel import** tab: download the template or upload
+any `.xlsx`/`.csv`. Columns (type, symbol, name, quantity, average cost,
+currency) are auto-detected, mapping can be corrected, and every row is
+previewed and editable before a batch insert.
 
-The iOS and Android apps use Capacitor and load the deployed Financial Tracker
-site so the web app, mobile app, Supabase data, and server APIs stay in sync.
-Mobile screens use bottom navigation and card-based holdings while desktop keeps
-the sidebar and tables.
+## Localization
 
-Sync web assets and Capacitor configuration after changing dependencies or
-native configuration:
+UI strings resolve through `tx()` in `lib/i18n.ts`, backed by
+`lib/translations.ts` and `lib/translation-overrides.json`, with English
+fallback for any untranslated phrase. Run `npm run i18n:check` to find gaps.
 
-```bash
-npm run mobile:sync
-```
+## Mobile app
 
-Open the native projects:
+The web app is wrapped with Capacitor (`ios/`, `android/`). The native shell
+loads the deployed URL; run `npm run mobile:sync` after building, then open the
+platform project to build in Xcode / Android Studio.
 
-```bash
-npm run mobile:ios
-npm run mobile:android
-```
+## Deployment
 
-The default mobile server is
-`https://financial-tracker-app-hazel.vercel.app`. To point a local native build
-at a different HTTPS deployment:
+Deployed on Vercel. Set the same environment variables in the Vercel project.
+Because the connected Git identity is not a member of the Vercel team, pushes do
+not auto-deploy; ship with the CLI instead:
 
 ```bash
-CAPACITOR_SERVER_URL=https://example.com npm run mobile:sync
+npx vercel --prod
 ```
 
-Xcode is required to build the iOS project. Android Studio and a compatible JDK
-are required to build the Android project.
+## Exchange-rate reliability
+
+Live conversions require a complete, validated USD-based rate set from ExchangeRate-API.
+The app shows the provider's update time (not the portfolio refresh time). Rates older
+than 36 hours or reused after a failed request are explicitly marked as estimates.
+The latest successful rates are kept in server memory and in this browser's local
+storage (`coinhabi.fx.v1`), so they can be reused after a server cold start. Browser
+storage contains only public exchange rates, not holdings or credentials; it is not
+shared across devices and can be cleared by the browser. If no valid rates are
+available, the app shows a retry screen instead of portfolio totals.
+
+Run exchange-rate failure/recovery checks with `node --test tests/fx.test.mjs`.

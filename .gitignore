@@ -30,8 +30,9 @@ coverage/
 *.pem
 .vercel
 
-# tooling and local metadata
-.claude/
+# tooling and local metadata (keep shared skills in version control)
+.claude/*
+!.claude/skills/
 .codex/
 .agents/
 .pnpm-store/

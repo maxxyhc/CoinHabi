@@ -2,7 +2,7 @@ import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
   appId: "app.financialtracker.mobile",
-  appName: "Financial Tracker",
+  appName: "Coinhabi",
   webDir: "mobile-shell",
   server: {
     url:

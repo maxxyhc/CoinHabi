@@ -1,6 +1,6 @@
 import type { AssetType, Currency } from "@/lib/types";
 
-export type FieldKey = "asset_type" | "symbol" | "name" | "quantity" | "average_cost" | "cost_currency";
+export type FieldKey = "asset_type" | "symbol" | "name" | "quantity" | "average_cost" | "break_even_price" | "cost_currency";
 
 export type Mapping = Record<FieldKey, number | null>;
 
@@ -11,11 +11,12 @@ export type Candidate = {
   name: string;
   quantity: string;
   average_cost: string;
+  break_even_price: string;
   cost_currency: Currency;
   include: boolean;
 };
 
-export const FIELD_ORDER: FieldKey[] = ["asset_type", "symbol", "name", "quantity", "average_cost", "cost_currency"];
+export const FIELD_ORDER: FieldKey[] = ["asset_type", "symbol", "name", "quantity", "average_cost", "break_even_price", "cost_currency"];
 
 export const fieldLabels: Record<FieldKey, { en: string; zh: string }> = {
   asset_type: { en: "Type", zh: "類型" },
@@ -23,6 +24,7 @@ export const fieldLabels: Record<FieldKey, { en: string; zh: string }> = {
   name: { en: "Name", zh: "名稱" },
   quantity: { en: "Quantity", zh: "數量" },
   average_cost: { en: "Average cost", zh: "平均成本" },
+  break_even_price: { en: "Break-even price", zh: "損益兩平價" },
   cost_currency: { en: "Currency", zh: "幣別" },
 };
 
@@ -33,6 +35,22 @@ const fieldAliases: Record<FieldKey, string[]> = {
   name: ["name", "名稱", "名字", "公司名稱", "資產名稱", "商品名稱", "description", "asset"],
   quantity: ["quantity", "qty", "shares", "units", "amount", "數量", "股數", "張數", "持有數量", "部位", "持股"],
   average_cost: ["averagecost", "avgcost", "cost", "price", "unitcost", "成本", "平均成本", "均價", "單價", "成本價", "買入價"],
+  break_even_price: [
+    "breakevenprice",
+    "breakeven",
+    "break-evenprice",
+    "損益兩平價",
+    "兩平價",
+    "損平價",
+    "含費成本",
+    "券商兩平價",
+    "preciodeequilibrio",
+    "puntodeequilibrio",
+    "損益分岐点価格",
+    "損益分岐価格",
+    "손익분기가격",
+    "손익분기점가격",
+  ],
   cost_currency: ["currency", "ccy", "幣別", "貨幣", "計價幣別", "幣種"],
 };
 
@@ -102,6 +120,9 @@ export function parseCurrency(raw: string, assetType: AssetType): Currency {
   const value = normalizeHeader(raw);
   if (["usd", "us", "美元", "美金", "dollar", "usdollar"].includes(value)) return "USD";
   if (["twd", "ntd", "nt", "台幣", "新台幣", "元"].includes(value)) return "TWD";
+  if (["eur", "euro", "歐元", "欧元", "ユーロ", "유로"].includes(value)) return "EUR";
+  if (["jpy", "yen", "日圓", "日元", "円", "엔"].includes(value)) return "JPY";
+  if (["krw", "won", "韓元", "韩元", "ウォン", "원"].includes(value)) return "KRW";
   return assetType === "tw_stock" ? "TWD" : "USD";
 }
 
@@ -131,6 +152,7 @@ export function buildCandidates(dataRows: unknown[][], mapping: Mapping): Candid
         name: nameRaw || symbolRaw.toUpperCase(),
         quantity: parseNumericString(cellAt(row, mapping.quantity)),
         average_cost: parseNumericString(cellAt(row, mapping.average_cost)),
+        break_even_price: parseNumericString(cellAt(row, mapping.break_even_price)),
         cost_currency: parseCurrency(currencyRaw, asset_type),
         include: true,
       } satisfies Candidate;
@@ -144,7 +166,9 @@ export function candidateIsValid(candidate: Candidate): boolean {
   if (!candidate.symbol.trim()) return false;
   const quantity = Number(candidate.quantity);
   const cost = Number(candidate.average_cost);
+  const breakEvenPrice = candidate.break_even_price === "" ? null : Number(candidate.break_even_price);
   if (candidate.quantity === "" || !Number.isFinite(quantity) || quantity < 0) return false;
   if (candidate.average_cost === "" || !Number.isFinite(cost) || cost < 0) return false;
+  if (breakEvenPrice !== null && (!Number.isFinite(breakEvenPrice) || breakEvenPrice < 0)) return false;
   return true;
 }

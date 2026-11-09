@@ -35,6 +35,36 @@ export function toTradingViewSymbol(holding: EnrichedHolding) {
     return `${nasdaq.has(symbol) ? "NASDAQ" : "NYSE"}:${symbol}`;
   }
 
+  if (holding.asset_type === "stock") {
+    const suffix = symbol.split(".").pop() ?? "";
+    const ticker = symbol.includes(".") ? symbol.slice(0, symbol.lastIndexOf(".")) : symbol;
+    const exchanges: Record<string, string> = {
+      T: "TSE",
+      HK: "HKEX",
+      KS: "KRX",
+      KQ: "KRX",
+      L: "LSE",
+      TO: "TSX",
+      V: "TSXV",
+      AX: "ASX",
+      SI: "SGX",
+      SS: "SSE",
+      SZ: "SZSE",
+      SW: "SIX",
+      NS: "NSE",
+      BO: "BSE",
+      SR: "TADAWUL",
+      PA: "EURONEXT",
+      AS: "EURONEXT",
+      DE: "XETR",
+      F: "FWB",
+      MI: "MIL",
+      MC: "BME",
+    };
+    const exchange = exchanges[suffix] ?? holding.exchange_code;
+    return exchange ? `${exchange}:${ticker}` : symbol;
+  }
+
   return null;
 }
 

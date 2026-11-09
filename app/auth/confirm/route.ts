@@ -8,7 +8,8 @@ export async function GET(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   const redirectTo = request.nextUrl.clone();
-  redirectTo.pathname = "/";
+  const next = request.nextUrl.searchParams.get("next");
+  redirectTo.pathname = next && /^\/[a-z0-9\-/]*$/i.test(next) ? next : "/";
   redirectTo.search = "";
 
   if (!supabaseUrl || !supabaseKey) {

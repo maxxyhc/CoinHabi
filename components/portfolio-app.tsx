@@ -1,5 +1,12 @@
 "use client";
 
+import { queueFlowActivity } from "@/lib/flow-activity";
+import { CashflowFlow } from "@/components/cashflow-flow";
+import { InvestmentCost } from "@/components/investment-cost";
+import { financialCopy } from "@/components/financial-summary-copy";
+import { FxStatus, fxCopy } from "@/components/fx-status";
+import { FX_CACHE_KEY, parseFxCache } from "@/lib/market/fx";
+
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
@@ -21,10 +28,12 @@ import {
   Globe2,
   Languages,
   LayoutDashboard,
+  Landmark,
   ListChecks,
   LogOut,
   Maximize2,
   Music,
+  Pencil,
   PieChart as PieIcon,
   Plus,
   Play,
@@ -34,6 +43,7 @@ import {
   ShieldCheck,
   ShoppingBag,
   Trash2,
+  TrendingDown,
   TrendingUp,
   Utensils,
   WalletCards,
@@ -54,48 +64,95 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import type { PieLabelRenderProps } from "recharts";
 import clsx from "clsx";
 import { createSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { TradingViewWidget, toTradingViewSymbol } from "@/components/tradingview-widget";
 import { WalletTracker } from "@/components/wallet-tracker";
 import { HoldingsImport } from "@/components/holdings-import";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { StockSymbolSearch } from "@/components/stock-symbol-search";
 import { MobilePortfolioApp } from "@/components/mobile-portfolio-app";
+import { BankMark } from "@/components/bank-mark";
+import { HoldingBubbles } from "@/components/holding-bubbles";
+import { GainCoverageWarning } from "@/components/gain-coverage-warning";
+import { GainCalculationModeSelector } from "@/components/gain-calculation-mode-selector";
+import { BacktestCard } from "@/components/backtest-card";
+import { HoldingsNews } from "@/components/holdings-news";
+import { InfoTip } from "@/components/info-tip";
+import {
+  InvestmentHistoryPanel,
+  InvestmentPerformancePanel,
+  InvestmentSaleModal,
+  getQuantityDecreaseHelp,
+  getRecordSaleLabel,
+} from "@/components/investment-ledger";
+import { MoneyProvider, useMoney } from "@/components/money-context";
+import { createMoney, formatCurrencyBuckets, formatCurrentPrice, type MoneyFmt } from "@/lib/money";
+import { createDemoData } from "@/lib/demo-data";
+import { BiometricLock } from "@/components/biometric-lock";
+import { authenticate, isBiometricAvailable, isNativePlatform } from "@/lib/biometric";
+import { hapticSuccess, tapMedium } from "@/lib/haptics";
+import { requestNotificationPermission, syncReminders } from "@/lib/notifications";
 import {
   aggregateHoldingsForOverview,
   buildFinancialHealthNotes,
   currencyAmountToUsd,
   currencyBucketTotal,
   currencyBucketsToUsd,
+  currencySymbols,
   emptyCurrencyBuckets,
   enrichHoldings,
-  formatCurrency,
   formatHealthRatio,
   formatPercent,
-  getFinancialHealthScore,
   getMonthlyCashflowOverview,
+  getInvestmentPerformance,
   getPortfolioTotals,
   groupBy,
   isSameMonth,
   parseDateOnly,
+  resolveAssetType,
+  resolveGainCalculationMode,
   type CurrencyBuckets,
+  type CurrencyFxInput,
   type MonthlyCashflowOverview,
 } from "@/lib/calculations";
+import { AppLoader } from "@/components/app-loader";
 import { getDictionary, isLocale, localeNames, localeOrder, tx } from "@/lib/i18n";
-import type { AssetType, CashflowTransaction, CashflowTransactionInput, CashflowType, CryptoSearchResult, Currency, Debt, DebtInput, DebtType, EnrichedHolding, Holding, HoldingInput, Locale, MarketResponse, MonthlyBudget, MonthlyBudgetInput, RecurringExpense, RecurringExpenseInput, SymbolSearchResult } from "@/lib/types";
+import { supportedCurrencies, totalBudgetCategory } from "@/lib/types";
+import type { AssetType, CashflowTransaction, CashflowTransactionInput, CashflowType, CryptoSearchResult, Currency, Debt, DebtInput, DebtType, EnrichedHolding, Holding, HoldingInput, InvestmentSaleInput, InvestmentTransaction, Locale, MarketResponse, MonthlyBudget, MonthlyBudgetInput, RecurringExpense, RecurringExpenseInput } from "@/lib/types";
 
-type Tab = "dashboard" | "holdings" | "quantities" | "cashflow" | "financialHealth" | "charts" | "analysis" | "settings";
+type Tab = "dashboard" | "holdings" | "quantities" | "bank" | "cashflow" | "financialHealth" | "charts" | "analysis" | "settings";
+
 
 const emptyForm: HoldingInput = {
-  asset_type: "us_stock",
+  asset_type: "stock",
   symbol: "",
   name: "",
   quantity: "0",
-  average_cost: "0",
+  average_cost: "",
+  break_even_price: "",
+  gain_calculation_mode: "estimated",
   cost_currency: "USD",
   market_data_id: null,
+  market_code: null,
+  exchange_code: null,
+  quote_currency: "USD",
+  lot_size: 1,
   cost_known: true,
 };
+
+function createCashForm(currency: Currency): HoldingInput {
+  return {
+    ...emptyForm,
+    asset_type: "cash",
+    average_cost: "1",
+    gain_calculation_mode: "average_cost",
+    cost_currency: currency,
+    symbol: "",
+    cost_known: true,
+  };
+}
 
 const emptyCashflowForm: CashflowTransactionInput = {
   transaction_type: "expense",
@@ -139,11 +196,12 @@ const emptyDebtForm: DebtInput = {
 
 const emptyBudgetForm: MonthlyBudgetInput = {
   month: new Date().toISOString().slice(0, 7),
-  category: "food",
+  category: "total",
   amount: "0",
   currency: "USD",
   notes: "",
 };
+
 
 const cashflowCategories: Record<CashflowType, Array<{ id: string; en: string; zh: string }>> = {
   income: [
@@ -252,60 +310,6 @@ function getPaymentMethodLabel(value: string | null | undefined, locale: Locale)
   return locale === "zh" ? method.zh : method.en;
 }
 
-function createDemoData() {
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentMonth = String(now.getMonth() + 1).padStart(2, "0");
-  const date = (day: number) => `${currentYear}-${currentMonth}-${String(day).padStart(2, "0")}`;
-  const isoNow = new Date().toISOString();
-
-  const holdings: Holding[] = [
-    { id: "demo-h-1", user_id: "demo-user", asset_type: "us_stock", symbol: "AAPL", name: "Apple Inc.", quantity: 8, average_cost: 172, cost_currency: "USD", notes: null, market_data_id: "AAPL", source_kind: "manual", source_label: "Manual", source_account_id: null, source_asset_id: null, cost_known: true, created_at: isoNow, updated_at: isoNow },
-    { id: "demo-h-2", user_id: "demo-user", asset_type: "tw_stock", symbol: "2330.TW", name: "Taiwan Semiconductor", quantity: 2, average_cost: 880, cost_currency: "TWD", notes: null, market_data_id: "2330.TW", source_kind: "manual", source_label: "Manual", source_account_id: null, source_asset_id: null, cost_known: true, created_at: isoNow, updated_at: isoNow },
-    { id: "demo-h-3", user_id: "demo-user", asset_type: "crypto", symbol: "BTC", name: "Bitcoin", quantity: 0.035, average_cost: 42000, cost_currency: "USD", notes: null, market_data_id: "bitcoin", source_kind: "wallet", source_label: "Demo BTC wallet", source_account_id: "demo-wallet-btc", source_asset_id: "demo-btc", cost_known: false, created_at: isoNow, updated_at: isoNow },
-    { id: "demo-h-4", user_id: "demo-user", asset_type: "crypto", symbol: "ETH", name: "Ethereum", quantity: 1.4, average_cost: 2400, cost_currency: "USD", notes: null, market_data_id: "ethereum", source_kind: "wallet", source_label: "Demo ETH wallet", source_account_id: "demo-wallet-eth", source_asset_id: "demo-eth", cost_known: false, created_at: isoNow, updated_at: isoNow },
-    { id: "demo-h-5", user_id: "demo-user", asset_type: "cash", symbol: "USD", name: "Cash", quantity: 3500, average_cost: 1, cost_currency: "USD", notes: null, market_data_id: null, source_kind: "manual", source_label: "Manual", source_account_id: null, source_asset_id: null, cost_known: true, created_at: isoNow, updated_at: isoNow },
-  ];
-
-  const transactions: CashflowTransaction[] = [
-    { id: "demo-t-1", user_id: "demo-user", transaction_type: "income", amount: 5200, currency: "USD", category: "salary", description: "Monthly salary", transaction_date: date(5), payment_method: "Bank transfer", notes: null, created_at: isoNow, updated_at: isoNow },
-    { id: "demo-t-2", user_id: "demo-user", transaction_type: "expense", amount: 18.5, currency: "USD", category: "food", description: "Lunch", transaction_date: date(8), payment_method: "Credit card", notes: null, created_at: isoNow, updated_at: isoNow },
-    { id: "demo-t-3", user_id: "demo-user", transaction_type: "expense", amount: 78, currency: "USD", category: "transport", description: "Gas", transaction_date: date(10), payment_method: "Credit card", notes: null, created_at: isoNow, updated_at: isoNow },
-    { id: "demo-t-4", user_id: "demo-user", transaction_type: "expense", amount: 145, currency: "USD", category: "shopping", description: "Household supplies", transaction_date: date(12), payment_method: "Credit card", notes: null, created_at: isoNow, updated_at: isoNow },
-    { id: "demo-t-5", user_id: "demo-user", transaction_type: "income", amount: 350, currency: "USD", category: "side_income", description: "Freelance project", transaction_date: date(18), payment_method: "Transfer", notes: null, created_at: isoNow, updated_at: isoNow },
-  ];
-
-  const recurringExpenses: RecurringExpense[] = [
-    { id: "demo-r-1", user_id: "demo-user", name: "YouTube Premium", amount: 13.99, currency: "USD", category: "subscription", frequency: "monthly", next_due_date: date(20), payment_method: "Credit card", is_active: true, is_subscription: true, usage_status: "active", reminder_days: 3, notes: null, created_at: isoNow, updated_at: isoNow },
-    { id: "demo-r-2", user_id: "demo-user", name: "Spotify USA", amount: 12.99, currency: "USD", category: "subscription", frequency: "monthly", next_due_date: date(22), payment_method: "Credit card", is_active: true, is_subscription: true, usage_status: "active", reminder_days: 3, notes: null, created_at: isoNow, updated_at: isoNow },
-    { id: "demo-r-3", user_id: "demo-user", name: "Insurance", amount: 960, currency: "USD", category: "insurance", frequency: "yearly", next_due_date: `${currentYear}-11-15`, payment_method: "Bank debit", is_active: true, is_subscription: false, usage_status: "active", reminder_days: 14, notes: null, created_at: isoNow, updated_at: isoNow },
-  ];
-
-  const debts: Debt[] = [
-    { id: "demo-d-1", user_id: "demo-user", name: "Car loan", debt_type: "car_loan", original_principal: 22000, remaining_principal: 14500, currency: "USD", interest_rate: 5.4, minimum_payment: 420, next_payment_date: date(25), lender: "Demo Bank", is_active: true, notes: null, created_at: isoNow, updated_at: isoNow },
-    { id: "demo-d-2", user_id: "demo-user", name: "Credit card plan", debt_type: "credit_card", original_principal: 3200, remaining_principal: 1800, currency: "USD", interest_rate: 18.9, minimum_payment: 160, next_payment_date: date(28), lender: "Demo Card", is_active: true, notes: null, created_at: isoNow, updated_at: isoNow },
-  ];
-
-  const budgets: MonthlyBudget[] = [
-    { id: "demo-b-1", user_id: "demo-user", month: `${currentYear}-${currentMonth}-01`, category: "food", amount: 650, currency: "USD", notes: null, created_at: isoNow, updated_at: isoNow },
-    { id: "demo-b-2", user_id: "demo-user", month: `${currentYear}-${currentMonth}-01`, category: "transport", amount: 300, currency: "USD", notes: null, created_at: isoNow, updated_at: isoNow },
-    { id: "demo-b-3", user_id: "demo-user", month: `${currentYear}-${currentMonth}-01`, category: "shopping", amount: 450, currency: "USD", notes: null, created_at: isoNow, updated_at: isoNow },
-  ];
-
-  const market: MarketResponse = {
-    refreshedAt: isoNow,
-    fx: { usdToTwd: 32.2, twdToUsd: 1 / 32.2 },
-    quotes: {
-      "demo-h-1": { symbol: "AAPL", price: 196.5, currency: "USD", priceUsd: 196.5, dayChangePercent: 0.8, source: "Demo" },
-      "demo-h-2": { symbol: "2330.TW", price: 960, currency: "TWD", priceUsd: 960 / 32.2, dayChangePercent: -0.4, source: "Demo" },
-      "demo-h-3": { symbol: "BTC", price: 61500, currency: "USD", priceUsd: 61500, dayChangePercent: 1.9, source: "Demo" },
-      "demo-h-4": { symbol: "ETH", price: 3350, currency: "USD", priceUsd: 3350, dayChangePercent: -1.1, source: "Demo" },
-      "demo-h-5": { symbol: "USD", price: 1, currency: "USD", priceUsd: 1, dayChangePercent: 0, source: "Demo" },
-    },
-  };
-
-  return { budgets, debts, holdings, market, recurringExpenses, transactions };
-}
 
 export function PortfolioApp({ demo = false }: { demo?: boolean }) {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
@@ -317,9 +321,11 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
   const [userId, setUserId] = useState("");
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [cashflowTransactions, setCashflowTransactions] = useState<CashflowTransaction[]>([]);
+  const [investmentTransactions, setInvestmentTransactions] = useState<InvestmentTransaction[]>([]);
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
   const [debts, setDebts] = useState<Debt[]>([]);
   const [monthlyBudgets, setMonthlyBudgets] = useState<MonthlyBudget[]>([]);
+  const [fxRefreshFailed, setFxRefreshFailed] = useState(false);
   const [market, setMarket] = useState<MarketResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -334,8 +340,86 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
   const [editingRecurringId, setEditingRecurringId] = useState<string | null>(null);
   const [editingDebtId, setEditingDebtId] = useState<string | null>(null);
   const [editingBudgetId, setEditingBudgetId] = useState<string | null>(null);
+  const [sellingHolding, setSellingHolding] = useState<EnrichedHolding | null>(null);
   const [portfolioName, setPortfolioName] = useState("");
+  const [displayCurrency, setDisplayCurrency] = useState<Currency>("USD");
+  const [biometricLock, setBiometricLock] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [nativePlatform, setNativePlatform] = useState(false);
+  const [paymentReminders, setPaymentReminders] = useState(false);
   const priceRequestId = useRef(0);
+
+  useEffect(() => {
+    document.documentElement.lang = {
+      en: "en",
+      es: "es",
+      ja: "ja",
+      ko: "ko",
+      zh: "zh-Hant",
+    }[locale];
+  }, [locale]);
+
+  useEffect(() => {
+    isBiometricAvailable().then(setBiometricAvailable);
+    setBiometricLock(window.localStorage.getItem("biometricLock") === "on");
+    setNativePlatform(isNativePlatform());
+    setPaymentReminders(window.localStorage.getItem("paymentReminders") === "on");
+  }, []);
+
+  async function changeBiometricLock(next: boolean) {
+    if (next) {
+      const ok = await authenticate(tx(locale, "Confirm to enable Face ID lock"));
+      if (!ok) return;
+    }
+    setBiometricLock(next);
+    window.localStorage.setItem("biometricLock", next ? "on" : "off");
+  }
+
+  async function changePaymentReminders(next: boolean) {
+    if (next) {
+      const granted = await requestNotificationPermission();
+      if (!granted) return;
+    }
+    setPaymentReminders(next);
+    window.localStorage.setItem("paymentReminders", next ? "on" : "off");
+  }
+
+  useEffect(() => {
+    if (!nativePlatform || demo) return;
+    syncReminders(recurringExpenses, debts, locale, paymentReminders);
+  }, [debts, demo, locale, nativePlatform, paymentReminders, recurringExpenses]);
+
+  const applyDefaultFormCurrency = useCallback((nextCurrency: Currency) => {
+    if (!editingCashflowId) setCashflowForm((current) => ({ ...current, currency: nextCurrency }));
+    if (!editingRecurringId) setRecurringForm((current) => ({ ...current, currency: nextCurrency }));
+    if (!editingDebtId) setDebtForm((current) => ({ ...current, currency: nextCurrency }));
+    if (!editingBudgetId) setBudgetForm((current) => ({ ...current, currency: nextCurrency }));
+  }, [editingBudgetId, editingCashflowId, editingDebtId, editingRecurringId]);
+
+  async function changeDisplayCurrency(nextCurrency: Currency) {
+    setDisplayCurrency(nextCurrency);
+    applyDefaultFormCurrency(nextCurrency);
+    window.localStorage.setItem(demo ? "displayCurrency:demo" : `displayCurrency:${userId}`, nextCurrency);
+
+    if (demo) {
+      return;
+    }
+
+    if (!supabase || !userId) return;
+    const { error: settingsError } = await supabase
+      .from("user_settings")
+      .upsert({ display_currency: nextCurrency, user_id: userId }, { onConflict: "user_id" });
+    if (settingsError) {
+      setError(settingsError.message.includes("display_currency")
+        ? "Please run supabase/migrations/0012_display_currency.sql in Supabase SQL Editor."
+        : settingsError.message);
+    }
+  }
+
+  const money = useMemo<MoneyFmt>(
+    () => createMoney(displayCurrency, market?.fx ?? 1 / 32),
+    [displayCurrency, market],
+  );
 
   async function changePortfolioName(nextName: string) {
     const trimmed = nextName.trim().slice(0, 12);
@@ -385,8 +469,13 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
     if (storedPortfolioName) {
       setPortfolioName(storedPortfolioName);
     }
+    const storedDisplayCurrency = window.localStorage.getItem("displayCurrency:demo") ?? window.localStorage.getItem("displayCurrency");
+    if (storedDisplayCurrency && (supportedCurrencies as readonly string[]).includes(storedDisplayCurrency)) {
+      setDisplayCurrency(storedDisplayCurrency as Currency);
+    }
     setHoldings(demoData.holdings);
     setCashflowTransactions(demoData.transactions);
+    setInvestmentTransactions(demoData.investmentTransactions);
     setRecurringExpenses(demoData.recurringExpenses);
     setDebts(demoData.debts);
     setMonthlyBudgets(demoData.budgets);
@@ -414,9 +503,14 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
     setUserId(user.id);
     setUserEmail(user.email ?? "");
 
+    const storedDisplayCurrency = window.localStorage.getItem(`displayCurrency:${user.id}`) ?? window.localStorage.getItem("displayCurrency");
+    if (storedDisplayCurrency && (supportedCurrencies as readonly string[]).includes(storedDisplayCurrency)) {
+      setDisplayCurrency(storedDisplayCurrency as Currency);
+    }
+
     const { data: settingsData, error: settingsError } = await supabase
       .from("user_settings")
-      .select("portfolio_name")
+      .select("*")
       .maybeSingle();
 
     if (settingsError) {
@@ -425,6 +519,11 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
       }
     } else {
       setPortfolioName(settingsData?.portfolio_name ?? "");
+      const storedCurrency = settingsData?.display_currency;
+      if (storedCurrency && (supportedCurrencies as readonly string[]).includes(storedCurrency)) {
+        setDisplayCurrency(storedCurrency as Currency);
+        window.localStorage.setItem(`displayCurrency:${user.id}`, storedCurrency);
+      }
     }
 
     const { data, error: holdingsError } = await supabase
@@ -451,6 +550,20 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
         : transactionError.message);
     } else {
       setCashflowTransactions((transactionData ?? []) as CashflowTransaction[]);
+    }
+
+    const { data: investmentTransactionData, error: investmentTransactionError } = await supabase
+      .from("investment_transactions")
+      .select("*")
+      .order("transaction_date", { ascending: false })
+      .order("created_at", { ascending: false });
+
+    if (investmentTransactionError) {
+      setError(investmentTransactionError.message.includes("investment_transactions")
+        ? "Please run supabase/migrations/0017_investment_transactions.sql in Supabase SQL Editor."
+        : investmentTransactionError.message);
+    } else {
+      setInvestmentTransactions((investmentTransactionData ?? []) as InvestmentTransaction[]);
     }
 
     const { data: recurringData, error: recurringError } = await supabase
@@ -503,16 +616,21 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
       const requestId = ++priceRequestId.current;
       setRefreshing(true);
       try {
+        let cachedFx = null;
+        try { cachedFx = parseFxCache(JSON.parse(localStorage.getItem(FX_CACHE_KEY) ?? "null")); } catch { /* Storage may be unavailable. */ }
         const response = await fetch("/api/market/quotes", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ holdings: nextHoldings }),
+          body: JSON.stringify({ holdings: nextHoldings, cachedFx }),
         });
         if (!response.ok) {
           throw new Error("Price refresh failed");
         }
         const data = (await response.json()) as MarketResponse;
         if (requestId === priceRequestId.current) {
+          setFxRefreshFailed(false);
+          setError((current) => current === "Price refresh failed" ? "" : current);
+          try { localStorage.setItem(FX_CACHE_KEY, JSON.stringify(data.fx)); } catch { /* In-memory data remains usable. */ }
           setMarket((current) => ({
             ...data,
             quotes: { ...(current?.quotes ?? {}), ...data.quotes },
@@ -520,6 +638,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
         }
       } catch (refreshError) {
         if (requestId === priceRequestId.current) {
+          setFxRefreshFailed(true);
           setError(refreshError instanceof Error ? refreshError.message : "Price refresh failed");
         }
       } finally {
@@ -541,10 +660,14 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
   }, [demo, holdings, loading, refreshPrices]);
 
   const enriched = useMemo(
-    () => enrichHoldings(holdings, market?.quotes ?? {}, market?.fx.twdToUsd ?? 1 / 32),
+    () => enrichHoldings(holdings, market?.quotes ?? {}, market?.fx ?? 1 / 32),
     [holdings, market],
   );
   const totals = useMemo(() => getPortfolioTotals(enriched), [enriched]);
+  const investmentPerformance = useMemo(
+    () => getInvestmentPerformance(enriched, investmentTransactions, market?.fx ?? 1 / 32),
+    [enriched, investmentTransactions, market],
+  );
   const assetMix = useMemo(() => groupBy(enriched, (holding) => holding.asset_type), [enriched]);
   const currencyMix = useMemo(() => groupBy(enriched, (holding) => holding.cost_currency), [enriched]);
   const editingHolding = useMemo(
@@ -606,11 +729,19 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
       name: holding.name,
       quantity: String(holding.quantity),
       average_cost: String(holding.average_cost),
+      break_even_price: holding.break_even_price == null
+        ? ""
+        : String(holding.break_even_price),
+      gain_calculation_mode: resolveGainCalculationMode(holding),
       cost_currency: holding.cost_currency,
       market_data_id: holding.market_data_id ?? null,
+      market_code: holding.market_code ?? null,
+      exchange_code: holding.exchange_code ?? null,
+      quote_currency: holding.quote_currency ?? holding.cost_currency,
+      lot_size: holding.lot_size ?? (holding.asset_type === "tw_stock" ? 1000 : 1),
       cost_known: holding.cost_known !== false,
     });
-    setActiveTab("holdings");
+    setActiveTab(holding.asset_type === "cash" ? "bank" : "holdings");
   }
 
   function startEditCashflow(transaction: CashflowTransaction) {
@@ -682,10 +813,16 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
     setForm(emptyForm);
   }
 
+  function resetCashForm() {
+    setEditingId(null);
+    setForm(createCashForm(displayCurrency));
+  }
+
   function resetCashflowForm() {
     setEditingCashflowId(null);
     setCashflowForm({
       ...emptyCashflowForm,
+      currency: displayCurrency,
       transaction_date: new Date().toISOString().slice(0, 10),
     });
   }
@@ -694,6 +831,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
     setEditingRecurringId(null);
     setRecurringForm({
       ...emptyRecurringForm,
+      currency: displayCurrency,
       next_due_date: new Date().toISOString().slice(0, 10),
     });
   }
@@ -702,6 +840,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
     setEditingDebtId(null);
     setDebtForm({
       ...emptyDebtForm,
+      currency: displayCurrency,
       next_payment_date: new Date().toISOString().slice(0, 10),
     });
   }
@@ -710,6 +849,8 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
     setEditingBudgetId(null);
     setBudgetForm({
       ...emptyBudgetForm,
+      category: totalBudgetCategory,
+      currency: displayCurrency,
       month: new Date().toISOString().slice(0, 7),
     });
   }
@@ -726,7 +867,15 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
     }
 
     const quantity = Number(form.quantity || 0);
-    const averageCost = Number(form.average_cost || 0);
+    const averageCost = form.asset_type === "cash" ? 1 : Number(form.average_cost || 0);
+    const gainCalculationMode = form.asset_type === "cash"
+      ? "average_cost"
+      : form.gain_calculation_mode;
+    const breakEvenInput = form.break_even_price.trim();
+    const parsedBreakEvenPrice = gainCalculationMode !== "break_even" || breakEvenInput === ""
+      ? null
+      : Number(breakEvenInput);
+    const breakEvenPrice = parsedBreakEvenPrice;
     if (form.quantity === "" || form.average_cost === "") {
       setForm((current) => ({
         ...current,
@@ -738,12 +887,31 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
       setError("Quantity and average cost must be valid numbers.");
       return;
     }
+    if (
+      editingId &&
+      !editingWalletCost &&
+      editingHolding &&
+      editingHolding.asset_type !== "cash" &&
+      quantity < editingHolding.quantity
+    ) {
+      setError(getQuantityDecreaseHelp(locale));
+      return;
+    }
+    if (
+      gainCalculationMode === "break_even" &&
+      (breakEvenPrice === null || !Number.isFinite(breakEvenPrice) || breakEvenPrice <= 0)
+    ) {
+      setError(t.breakEvenInvalid);
+      return;
+    }
 
     if (editingId && editingWalletCost) {
       const { error: costError } = await supabase
         .from("holdings")
         .update({
           average_cost: averageCost,
+          break_even_price: breakEvenPrice,
+          gain_calculation_mode: gainCalculationMode,
           cost_currency: form.cost_currency,
           cost_known: form.cost_known !== false,
         })
@@ -759,14 +927,77 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
       return;
     }
 
+    const isCash = form.asset_type === "cash";
+    if (isCash && !form.name.trim()) {
+      setError(tx(locale, "Enter a bank name."));
+      return;
+    }
     const payload = {
       ...form,
+      asset_type: resolveAssetType(form),
       user_id: userId,
-      symbol: form.symbol.toUpperCase().trim(),
-      name: form.name.trim() || form.symbol.toUpperCase().trim(),
+      symbol: isCash ? form.cost_currency : form.symbol.toUpperCase().trim(),
+      name: isCash ? form.name.trim() : (form.name.trim() || form.symbol.toUpperCase().trim()),
       quantity,
       average_cost: averageCost,
+      break_even_price: breakEvenPrice,
+      gain_calculation_mode: gainCalculationMode,
+      cost_known: isCash ? true : form.cost_known,
     };
+
+    // A manual top-up belongs to the existing position, not a second row. Wallet
+    // assets remain separate because their on-chain cost basis is not reliable.
+    if (!editingId && !isCash) {
+      const { data: matches, error: findError } = await supabase
+        .from("holdings")
+        .select("id, quantity, average_cost, break_even_price, gain_calculation_mode, cost_known, name, market_data_id, market_code, exchange_code, quote_currency, lot_size")
+        .eq("user_id", userId)
+        .eq("source_kind", "manual")
+        .eq("asset_type", payload.asset_type)
+        .eq("symbol", payload.symbol)
+        .eq("cost_currency", payload.cost_currency)
+        .limit(1);
+
+      if (findError) {
+        setError(findError.message);
+        return;
+      }
+
+      const existing = matches?.[0];
+      if (existing) {
+        const mergedQuantity = existing.quantity + quantity;
+        const bothCostsKnown = existing.cost_known !== false && payload.cost_known !== false;
+        const mergedAverageCost = bothCostsKnown && mergedQuantity > 0
+          ? ((existing.quantity * existing.average_cost) + (quantity * averageCost)) / mergedQuantity
+          : existing.average_cost;
+        const { error: mergeError } = await supabase
+          .from("holdings")
+          .update({
+            quantity: mergedQuantity,
+            average_cost: mergedAverageCost,
+            break_even_price: breakEvenPrice,
+            gain_calculation_mode: gainCalculationMode,
+            cost_known: bothCostsKnown,
+            name: existing.name || payload.name,
+            market_data_id: payload.market_data_id ?? existing.market_data_id ?? null,
+            market_code: payload.market_code ?? existing.market_code ?? null,
+            exchange_code: payload.exchange_code ?? existing.exchange_code ?? null,
+            quote_currency: payload.quote_currency ?? existing.quote_currency ?? null,
+            lot_size: payload.lot_size ?? existing.lot_size ?? 1,
+          })
+          .eq("id", existing.id);
+
+        if (mergeError) {
+          setError(mergeError.message);
+          return;
+        }
+
+        hapticSuccess();
+        resetForm();
+        await loadHoldings();
+        return;
+      }
+    }
 
     const query = editingId
       ? supabase.from("holdings").update(payload).eq("id", editingId)
@@ -778,7 +1009,37 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
       return;
     }
 
+    hapticSuccess();
     resetForm();
+    await loadHoldings();
+  }
+
+  async function recordInvestmentSale(input: InvestmentSaleInput) {
+    if (demo) {
+      throw new Error(tx(locale, "Demo mode is read-only. Changes are not saved."));
+    }
+    if (!supabase || !userId) {
+      throw new Error("Supabase is not ready.");
+    }
+
+    const { error: saleError } = await supabase.rpc("record_investment_sale", {
+      p_fees: input.fees,
+      p_holding_id: input.holdingId,
+      p_notes: input.notes.trim() || null,
+      p_price_per_unit: input.pricePerUnit,
+      p_quantity: input.quantity,
+      p_transaction_date: input.transactionDate,
+    });
+
+    if (saleError) {
+      throw new Error(
+        saleError.message.includes("record_investment_sale") || saleError.message.includes("investment_transactions")
+          ? "Please run supabase/migrations/0017_investment_transactions.sql in Supabase SQL Editor."
+          : saleError.message,
+      );
+    }
+
+    hapticSuccess();
     await loadHoldings();
   }
 
@@ -815,11 +1076,13 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
       ? supabase.from("cashflow_transactions").update(payload).eq("id", editingCashflowId)
       : supabase.from("cashflow_transactions").insert(payload);
 
-    const { error: saveError } = await query;
+    const { data: saved, error: saveError } = await query.select("id").single();
     if (saveError) {
       setError(saveError.message);
       return;
     }
+
+    if (!editingCashflowId && saved) queueFlowActivity(saved.id);
 
     resetCashflowForm();
     await loadHoldings();
@@ -978,7 +1241,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
     const { error: saveError } = await query;
     if (saveError) {
       setError(saveError.message.includes("monthly_budgets")
-        ? "Please run supabase/migrations/0009_monthly_budgets.sql in Supabase SQL Editor."
+        ? "Please run supabase/migrations/0011_multi_currency_total_budget.sql in Supabase SQL Editor."
         : saveError.message);
       return;
     }
@@ -1000,6 +1263,30 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
       setError(deleteError.message);
       return;
     }
+    await loadHoldings();
+  }
+
+  async function clearAllHoldings() {
+    if (demo) {
+      setError(tx(locale, "Demo mode is read-only. Nothing was deleted."));
+      return;
+    }
+    if (!supabase || !userId || !holdings.length) {
+      return;
+    }
+    const confirmed = window.confirm(
+      tx(locale, "Delete all {count} holdings? This cannot be undone. Wallet-tracked assets will reappear after the next wallet sync.", {
+        count: holdings.length,
+      }),
+    );
+    if (!confirmed) return;
+    const { error: deleteError } = await supabase.from("holdings").delete().eq("user_id", userId);
+    if (deleteError) {
+      setError(deleteError.message);
+      return;
+    }
+    tapMedium();
+    resetForm();
     await loadHoldings();
   }
 
@@ -1083,34 +1370,64 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
     window.location.href = "/login";
   }
 
-  if (loading) {
-    return (
-      <main className="flex min-h-screen items-center justify-center">
-        <div className="glass-panel apple-card p-8 text-titanium">Loading portfolio...</div>
-      </main>
-    );
+  async function deleteAccount() {
+    if (demo) {
+      throw new Error(tx(locale, "Demo mode is read-only. Nothing was deleted."));
+    }
+    if (!supabase) {
+      throw new Error(tx(locale, "Supabase environment variables are missing."));
+    }
+
+    const response = await fetch("/api/account/delete", { method: "DELETE" });
+    const payload = await response.json().catch(() => null) as { error?: string } | null;
+    if (!response.ok) {
+      throw new Error(payload?.error ?? tx(locale, "Could not delete this account."));
+    }
+
+    await supabase.auth.signOut();
+    window.location.href = "/login?account_deleted=1";
   }
 
-  if (mobileLayout === null) {
-    return (
-      <main className="flex min-h-[100dvh] items-center justify-center">
-        <div className="glass-panel apple-card p-8 text-titanium">Loading interface...</div>
+  if (loading || (!market && !fxRefreshFailed) || mobileLayout === null) {
+    return <AppLoader label={tx(locale, "Loading portfolio")} />;
+  }
+
+  if (!market) {
+    const c = fxCopy(locale);
+    return <BiometricLock demo={demo} enabled={biometricLock} locale={locale}>
+      <main className="flex min-h-[100dvh] items-center justify-center p-5">
+        <div role="status" className="apple-card max-w-md space-y-4 border border-line p-6 text-ink">
+          <p>{c.unavailable}</p>
+          <button type="button" disabled={refreshing} onClick={() => refreshPrices()} className="primary-button focus-ring min-h-11 rounded-xl px-5 disabled:opacity-50">{c.retry}</button>
+        </div>
       </main>
-    );
+    </BiometricLock>;
   }
 
   if (mobileLayout) {
     return (
+      <BiometricLock demo={demo} enabled={biometricLock} locale={locale}>
       <MobilePortfolioApp
+        fxStatus={<FxStatus fx={market.fx} locale={locale} failed={fxRefreshFailed} />}
+        biometricAvailable={biometricAvailable}
+        biometricLock={biometricLock}
+        nativePlatform={nativePlatform}
+        paymentReminders={paymentReminders}
+        onBiometricLockChange={changeBiometricLock}
+        onPaymentRemindersChange={changePaymentReminders}
         budgets={monthlyBudgets}
         cashflowForm={cashflowForm}
         debtForm={debtForm}
         debts={debts}
         demo={demo}
+        editingDebt={Boolean(editingDebtId)}
         editingHolding={Boolean(editingId)}
+        editingRecurring={Boolean(editingRecurringId)}
         enriched={enriched}
         error={error}
         form={form}
+        investmentPerformance={investmentPerformance}
+        investmentTransactions={investmentTransactions}
         locale={locale}
         portfolioName={portfolioName}
         recurringExpenses={recurringExpenses}
@@ -1118,15 +1435,27 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
         refreshedAt={market?.refreshedAt}
         refreshing={refreshing}
         transactions={cashflowTransactions}
-        twdToUsd={market?.fx.twdToUsd ?? 1 / 32}
+        displayCurrency={displayCurrency}
+        fx={market?.fx ?? 1 / 32}
         userEmail={userEmail}
         userId={userId}
         onDeleteHolding={deleteHolding}
+        onEditHolding={startEdit}
+        onSellHolding={setSellingHolding}
+        onCloseSale={() => setSellingHolding(null)}
+        onRecordSale={recordInvestmentSale}
+        sellingHolding={sellingHolding}
+        onDeleteDebt={deleteDebt}
+        onDeleteRecurring={deleteRecurringExpense}
+        onEditDebt={startEditDebt}
+        onEditRecurring={startEditRecurring}
+        onDisplayCurrencyChange={changeDisplayCurrency}
         onHoldingsChanged={loadHoldings}
         onLocaleChange={changeLocale}
         onPortfolioNameChange={changePortfolioName}
         onRefresh={() => refreshPrices()}
         onResetCashflow={resetCashflowForm}
+        onResetCashHolding={resetCashForm}
         onResetDebt={resetDebtForm}
         onResetHolding={resetForm}
         onResetRecurring={resetRecurringForm}
@@ -1134,16 +1463,20 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
         onSaveDebt={saveDebt}
         onSaveHolding={saveHolding}
         onSaveRecurring={saveRecurringExpense}
+        onDeleteAccount={deleteAccount}
         onSignOut={signOut}
         onUpdateCashflow={updateCashflowForm}
         onUpdateDebt={updateDebtForm}
         onUpdateHolding={updateForm}
         onUpdateRecurring={updateRecurringForm}
       />
+      </BiometricLock>
     );
   }
 
   return (
+    <MoneyProvider money={money}>
+    <BiometricLock demo={demo} enabled={biometricLock} locale={locale}>
     <main className="min-h-screen px-3 py-3 sm:px-6 sm:py-6">
       <div className="mx-auto grid max-w-[1520px] grid-cols-1 gap-5 lg:grid-cols-[236px_1fr]">
         <aside className="glass-panel app-sidebar p-3.5 lg:sticky lg:top-6 lg:h-[calc(100dvh-3rem)] lg:overflow-hidden">
@@ -1164,6 +1497,9 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
                 <NavButton active={activeTab === "holdings"} icon={<WalletCards size={18} />} label={t.holdings} onClick={() => setActiveTab("holdings")} />
                 <NavButton active={activeTab === "quantities"} icon={<ListChecks size={18} />} label={t.quantities} onClick={() => setActiveTab("quantities")} />
                 <NavButton active={activeTab === "analysis"} icon={<BarChart3 size={18} />} label={t.analysis} onClick={() => setActiveTab("analysis")} />
+              </NavSection>
+              <NavSection label={tx(locale, "Bank")}>
+                <NavButton active={activeTab === "bank"} icon={<Landmark size={18} />} label={tx(locale, "Cash")} onClick={() => { resetCashForm(); setActiveTab("bank"); }} />
               </NavSection>
               <NavSection label={tx(locale, "Cashflow")}>
                 <NavButton active={activeTab === "cashflow"} icon={<ReceiptText size={18} />} label={t.cashflow} onClick={() => setActiveTab("cashflow")} />
@@ -1197,13 +1533,17 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
         <section className="min-w-0 space-y-5">
           <Header
             activeTab={activeTab}
+            displayCurrency={displayCurrency}
             locale={locale}
             refreshedAt={market?.refreshedAt}
             refreshing={refreshing}
             t={t}
             onRefresh={() => refreshPrices()}
+            onDisplayCurrencyChange={changeDisplayCurrency}
             onLocaleChange={changeLocale}
           />
+
+          <FxStatus fx={market.fx} locale={locale} failed={fxRefreshFailed} />
 
           {error && (
             <div className="apple-card-sm border border-rose/30 bg-rose/10 p-4 text-sm text-rose">
@@ -1212,7 +1552,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
           )}
 
           {activeTab === "dashboard" && (
-            <DashboardView enriched={enriched} assetMix={assetMix} locale={locale} totals={totals} t={t} onEdit={startEdit} />
+            <DashboardView enriched={enriched} assetMix={assetMix} investmentPerformance={investmentPerformance} locale={locale} totals={totals} t={t} onEdit={startEdit} />
           )}
 
           {activeTab === "holdings" && (
@@ -1221,12 +1561,15 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
               editingId={editingId}
               enriched={enriched}
               form={form}
+              investmentTransactions={investmentTransactions}
               editingWalletCost={editingWalletCost}
               locale={locale}
               t={t}
               userId={userId}
+              onClearAll={clearAllHoldings}
               onDelete={deleteHolding}
               onEdit={startEdit}
+              onSell={setSellingHolding}
               onReset={resetForm}
               onSave={saveHolding}
               onUpdateForm={updateForm}
@@ -1234,12 +1577,35 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
             />
           )}
 
+          {activeTab === "bank" && (
+            <HoldingsView
+              cashOnly
+              demo={demo}
+              editingId={editingId}
+              editingWalletCost={false}
+              enriched={enriched}
+              form={form}
+              locale={locale}
+              t={t}
+              userId={userId}
+              onClearAll={clearAllHoldings}
+              onDelete={deleteHolding}
+              onEdit={startEdit}
+              onReset={resetCashForm}
+              onSave={saveHolding}
+              onUpdateForm={updateForm}
+              onHoldingsChanged={loadHoldings}
+            />
+          )}
+
           {activeTab === "quantities" && (
-            <QuantitiesView enriched={aggregateHoldingsForOverview(enriched)} locale={locale} t={t} />
+            <QuantitiesView enriched={aggregateHoldingsForOverview(enriched.filter((holding) => holding.asset_type !== "cash"))} locale={locale} t={t} />
           )}
 
           {activeTab === "cashflow" && (
             <CashflowView
+              assetValue={totals.totalValue}
+              cashValue={enriched.filter(h => h.asset_type === "cash").reduce((sum, h) => sum + h.valueUsd, 0)}
               budgetEditingId={editingBudgetId}
               budgetForm={budgetForm}
               budgets={monthlyBudgets}
@@ -1285,7 +1651,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
               recurringExpenses={recurringExpenses}
               totals={totals}
               transactions={cashflowTransactions}
-              twdToUsd={market?.fx.twdToUsd ?? 1 / 32}
+              twdToUsd={market?.fx ?? 1 / 32}
             />
           )}
 
@@ -1297,7 +1663,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
               recurringExpenses={recurringExpenses}
               totals={totals}
               transactions={cashflowTransactions}
-              twdToUsd={market?.fx.twdToUsd ?? 1 / 32}
+              twdToUsd={market?.fx ?? 1 / 32}
             />
           )}
 
@@ -1312,32 +1678,46 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
           )}
 
           {activeTab === "settings" && (
-            <SettingsView locale={locale} market={market} t={t} onLocaleChange={changeLocale} />
+            <SettingsView biometricAvailable={biometricAvailable} biometricLock={biometricLock} demo={demo} displayCurrency={displayCurrency} locale={locale} market={market} nativePlatform={nativePlatform} paymentReminders={paymentReminders} t={t} onBiometricLockChange={changeBiometricLock} onDeleteAccount={deleteAccount} onDisplayCurrencyChange={changeDisplayCurrency} onLocaleChange={changeLocale} onPaymentRemindersChange={changePaymentReminders} />
           )}
         </section>
       </div>
+      {sellingHolding && (
+        <InvestmentSaleModal
+          holding={sellingHolding}
+          locale={locale}
+          onClose={() => setSellingHolding(null)}
+          onSubmit={recordInvestmentSale}
+        />
+      )}
     </main>
+    </BiometricLock>
+    </MoneyProvider>
   );
 }
 
 function Header({
   activeTab,
+  displayCurrency,
   locale,
   refreshedAt,
   refreshing,
   t,
   onRefresh,
+  onDisplayCurrencyChange,
   onLocaleChange,
 }: {
   activeTab: Tab;
+  displayCurrency: Currency;
   locale: Locale;
   refreshedAt?: string;
   refreshing: boolean;
   t: ReturnType<typeof getDictionary>;
   onRefresh: () => void;
+  onDisplayCurrencyChange: (currency: Currency) => void;
   onLocaleChange: (locale: Locale) => void;
 }) {
-  const title = t[activeTab];
+  const title = activeTab === "bank" ? tx(locale, "Cash") : t[activeTab];
   return (
     <header className="glass-panel apple-card flex items-center justify-between gap-3 px-3.5 py-3 sm:flex-wrap sm:gap-4 sm:px-6 sm:py-4">
       <div className="min-w-0 flex-1">
@@ -1361,6 +1741,21 @@ function Header({
             {localeOrder.map((item) => <option key={item} value={item}>{localeNames[item]}</option>)}
           </select>
         </label>
+        <label className="pill-panel focus-within:ring-2 focus-within:ring-[var(--accent)]/35 relative hidden h-11 min-w-[112px] cursor-pointer items-center justify-center gap-2 rounded-full px-4 min-[520px]:flex">
+          <CircleDollarSign aria-hidden="true" className="shrink-0 text-[var(--accent)]" size={18} />
+          <span className="text-sm font-semibold text-ink">{currencySymbols[displayCurrency]} {displayCurrency}</span>
+          <select
+            aria-label={t.baseCurrency}
+            title={t.baseCurrency}
+            className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
+            value={displayCurrency}
+            onChange={(event) => onDisplayCurrencyChange(event.target.value as Currency)}
+          >
+            {supportedCurrencies.map((currency) => (
+              <option key={currency} value={currency}>{currencySymbols[currency]} {currency}</option>
+            ))}
+          </select>
+        </label>
         <button
           aria-label={t.refresh}
           className="primary-button focus-ring flex h-11 min-w-11 items-center justify-center gap-2 rounded-full px-3 text-sm font-medium transition sm:px-4"
@@ -1378,6 +1773,7 @@ function Header({
 function DashboardView({
   enriched,
   assetMix,
+  investmentPerformance,
   locale,
   totals,
   t,
@@ -1385,19 +1781,37 @@ function DashboardView({
 }: {
   enriched: EnrichedHolding[];
   assetMix: Array<{ name: string; value: number }>;
+  investmentPerformance: ReturnType<typeof getInvestmentPerformance>;
   locale: Locale;
   totals: ReturnType<typeof getPortfolioTotals>;
   t: ReturnType<typeof getDictionary>;
   onEdit: (holding: Holding) => void;
 }) {
-  const overviewHoldings = useMemo(() => aggregateHoldingsForOverview(enriched), [enriched]);
+  const money = useMoney();
+  const overviewHoldings = useMemo(
+    () => sortDashboardHoldings(aggregateHoldingsForOverview(enriched)),
+    [enriched],
+  );
+  const investmentHoldings = useMemo(
+    () => overviewHoldings.filter((holding) => holding.asset_type !== "cash"),
+    [overviewHoldings],
+  );
+  const cashHoldings = useMemo(
+    () => overviewHoldings.filter((holding) => holding.asset_type === "cash"),
+    [overviewHoldings],
+  );
   const sourceMap = useMemo(() => buildSourceMap(enriched), [enriched]);
   const [chartKey, setChartKey] = useState("");
   const [tradingViewTheme, setTradingViewTheme] = useState<"dark" | "light">("light");
-  const selectedChartHolding = overviewHoldings.find((holding) => holdingSourceKey(holding) === chartKey) ?? overviewHoldings[0] ?? null;
+  const selectedChartHolding = investmentHoldings.find((holding) => holdingSourceKey(holding) === chartKey) ?? investmentHoldings[0] ?? null;
   const tradingViewSymbol = selectedChartHolding ? toTradingViewSymbol(selectedChartHolding) : null;
-  const leaders = [...overviewHoldings].sort((a, b) => b.gainPercent - a.gainPercent).slice(0, 3);
-  const laggards = [...overviewHoldings].sort((a, b) => a.gainPercent - b.gainPercent).slice(0, 3);
+  const performanceHoldings = investmentHoldings.filter((holding) => holding.gainConfirmed);
+  const leaders = [...performanceHoldings].sort((a, b) => b.gainPercent - a.gainPercent).slice(0, 3);
+  const laggards = [...performanceHoldings].sort((a, b) => a.gainPercent - b.gainPercent).slice(0, 3);
+  const gainWarning = t.gainCoverageWarning
+    .replace("{known}", String(totals.gainKnownCount))
+    .replace("{total}", String(totals.gainInvestmentCount));
+  const showGainWarning = totals.gainInvestmentCount > 0 && !totals.gainDataComplete;
 
   useEffect(() => {
     const updateTheme = () => setTradingViewTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
@@ -1408,23 +1822,37 @@ function DashboardView({
   }, []);
 
   useEffect(() => {
-    if (!overviewHoldings.length) {
+    if (!investmentHoldings.length) {
       setChartKey("");
       return;
     }
-    if (!overviewHoldings.some((holding) => holdingSourceKey(holding) === chartKey)) {
-      setChartKey(holdingSourceKey(overviewHoldings[0]));
+    if (!investmentHoldings.some((holding) => holdingSourceKey(holding) === chartKey)) {
+      setChartKey(holdingSourceKey(investmentHoldings[0]));
     }
-  }, [chartKey, overviewHoldings]);
+  }, [chartKey, investmentHoldings]);
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard primary label={t.totalValue} value={formatCurrency(totals.totalValue)} icon={<CircleDollarSign size={20} />} />
-        <MetricCard label={t.totalGain} value={formatCurrency(totals.totalGain)} trend={totals.totalGain} icon={<Activity size={20} />} />
-        <MetricCard label={t.dayChange} value={formatCurrency(totals.dayChange)} detail={formatPercent(totals.dayChangePercent)} trend={totals.dayChange} icon={<RefreshCw size={20} />} />
-        <MetricCard label={t.returnRate} value={formatPercent(totals.totalReturn)} trend={totals.totalReturn} icon={<BarChart3 size={20} />} />
+        <MetricCard footer={<InvestmentCost holdings={enriched} locale={locale} />} primary label={t.totalValue} value={money.fmtUsd(totals.totalValue)} icon={<CircleDollarSign size={20} />} />
+        <MetricCard
+          icon={<Activity size={20} />}
+          label={t.totalGain}
+          trend={totals.hasGainData ? totals.totalGain : undefined}
+          value={totals.hasGainData ? money.fmtUsd(totals.totalGain) : "N/A"}
+          warning={showGainWarning ? gainWarning : undefined}
+        />
+        <MetricCard label={t.dayChange} value={money.fmtUsd(totals.dayChange)} detail={formatPercent(totals.dayChangePercent)} trend={totals.dayChange} icon={<RefreshCw size={20} />} />
+        <MetricCard
+          icon={<BarChart3 size={20} />}
+          label={t.returnRate}
+          trend={totals.hasGainData ? totals.totalReturn : undefined}
+          value={totals.hasGainData ? formatPercent(totals.totalReturn) : "N/A"}
+          warning={showGainWarning ? gainWarning : undefined}
+        />
       </div>
+
+      <InvestmentPerformancePanel locale={locale} performance={investmentPerformance} />
 
       <section className="glass-panel apple-card p-5 sm:p-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -1436,7 +1864,7 @@ function DashboardView({
             value={selectedChartHolding ? holdingSourceKey(selectedChartHolding) : ""}
             onChange={(event) => setChartKey(event.target.value)}
           >
-            {overviewHoldings.map((holding) => (
+            {investmentHoldings.map((holding) => (
               <option key={holdingSourceKey(holding)} value={holdingSourceKey(holding)}>
                 {holding.symbol} · {holding.name}
               </option>
@@ -1446,18 +1874,19 @@ function DashboardView({
         <TradingViewWidget locale={locale} symbol={tradingViewSymbol} theme={tradingViewTheme} />
       </section>
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_380px]">
+      <div className="grid grid-cols-1 gap-5 2xl:grid-cols-[minmax(0,1fr)_360px]">
         <section className="glass-panel apple-card p-5 sm:p-6">
           <div className="mb-5 flex items-center justify-between">
             <div>
-              <h3 className="text-xl font-semibold text-ink">{t.holdings}</h3>
-              <p className="mt-1 text-sm text-titanium">{overviewHoldings.length} assets</p>
+              <h3 className="text-xl font-semibold text-ink">{t.investmentHoldings}</h3>
+              <p className="mt-1 text-sm text-titanium">{investmentHoldings.length}</p>
             </div>
           </div>
           <HoldingsTable
             allowEdit={false}
             compact
-            enriched={overviewHoldings}
+            enriched={investmentHoldings}
+            locale={locale}
             sourceMap={sourceMap}
             t={t}
             onDelete={() => undefined}
@@ -1474,14 +1903,34 @@ function DashboardView({
             <ChartPanel data={assetMix.map((item) => ({ ...item, name: t[item.name as AssetType] }))} />
           </section>
 
-          <DayMoversPanel holdings={overviewHoldings} locale={locale} totals={totals} />
+          <DayMoversPanel holdings={investmentHoldings} locale={locale} totals={totals} />
         </div>
       </div>
+
+      <section className="glass-panel apple-card p-5 sm:p-6">
+        <div className="mb-5">
+          <h3 className="text-xl font-semibold text-ink">{t.bankCash}</h3>
+          <p className="mt-1 text-sm text-titanium">{cashHoldings.length}</p>
+        </div>
+        <HoldingsTable
+          allowEdit={false}
+          cashOnly
+          compact
+          enriched={cashHoldings}
+          locale={locale}
+          sourceMap={sourceMap}
+          t={t}
+          onDelete={() => undefined}
+          onEdit={onEdit}
+        />
+      </section>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
         <RankPanel title={t.leaders} holdings={leaders} t={t} />
         <RankPanel title={t.laggards} holdings={laggards} t={t} />
       </div>
+
+      <HoldingsNews holdings={enriched} locale={locale} />
     </div>
   );
 }
@@ -1495,6 +1944,7 @@ function DayMoversPanel({
   locale: Locale;
   totals: ReturnType<typeof getPortfolioTotals>;
 }) {
+  const money = useMoney();
   const movers = [...holdings]
     .filter((holding) => holding.asset_type !== "cash" && holding.quote && Math.abs(holding.dayChangeUsd) > 0.005)
     .sort((a, b) => b.dayChangeUsd - a.dayChangeUsd)
@@ -1532,7 +1982,7 @@ function DayMoversPanel({
                   </div>
                   <span className={clsx("text-right tabular-nums", positive ? "text-mint" : "text-rose")}>
                     {positive ? "+" : ""}
-                    {formatCurrency(holding.dayChangeUsd)}
+                    {money.fmtUsd(holding.dayChangeUsd)}
                   </span>
                 </div>
               );
@@ -1542,7 +1992,7 @@ function DayMoversPanel({
             <span className="text-sm text-titanium">{tx(locale, "Total today")}</span>
             <span className={clsx("font-semibold tabular-nums", totalPositive ? "text-mint" : "text-rose")}>
               {totalPositive ? "+" : ""}
-              {formatCurrency(totals.dayChange)} · {formatPercent(totals.dayChangePercent)}
+              {money.fmtUsd(totals.dayChange)} · {formatPercent(totals.dayChangePercent)}
             </span>
           </div>
         </>
@@ -1582,7 +2032,7 @@ function ChartsView({
   recurringExpenses: RecurringExpense[];
   totals: ReturnType<typeof getPortfolioTotals>;
   transactions: CashflowTransaction[];
-  twdToUsd: number;
+  twdToUsd: CurrencyFxInput;
 }) {
   const zh = locale === "zh";
   const monthlyCashflow = useMemo(() => getMonthlyCashflowChartData(transactions, twdToUsd, locale), [locale, transactions, twdToUsd]);
@@ -1734,8 +2184,9 @@ function FinancialHealthView({
   recurringExpenses: RecurringExpense[];
   totals: ReturnType<typeof getPortfolioTotals>;
   transactions: CashflowTransaction[];
-  twdToUsd: number;
+  twdToUsd: CurrencyFxInput;
 }) {
+  const money = useMoney();
   const zh = locale === "zh";
   const monthTransactions = transactions.filter((transaction) => isSameMonth(transaction.transaction_date));
   const activeRecurringExpenses = recurringExpenses.filter((expense) => expense.is_active);
@@ -1761,18 +2212,6 @@ function FinancialHealthView({
   const fixedPressure = incomeUsd > 0 ? (fixedUsd / incomeUsd) * 100 : null;
   const debtIncomeRatio = incomeUsd > 0 ? (debtPaymentUsd / incomeUsd) * 100 : null;
   const dataIssues = unknownCostCount + missingPriceCount;
-  const healthScore = getFinancialHealthScore({
-    dataIssues,
-    debtIncomeRatio,
-    fixedPressure,
-    savingsRate,
-  });
-  const healthTone = healthScore >= 80 ? "text-mint" : healthScore >= 60 ? "text-amber" : "text-rose";
-  const healthLabel = healthScore >= 80
-    ? (tx(locale, "Strong"))
-    : healthScore >= 60
-      ? (tx(locale, "Needs attention"))
-      : (tx(locale, "Needs work"));
   const notes = buildFinancialHealthNotes({
     dataIssues,
     debtIncomeRatio,
@@ -1787,61 +2226,13 @@ function FinancialHealthView({
 
   return (
     <div className="space-y-5">
-      <section className="glass-panel apple-card relative overflow-hidden">
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute -right-28 -top-32 h-80 w-80 rounded-full bg-[var(--accent)] opacity-[0.055] blur-3xl"
-        />
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute bottom-0 left-[42%] h-px w-1/3 bg-gradient-to-r from-transparent via-[var(--accent)] to-transparent opacity-40"
-        />
-        <div className="relative grid grid-cols-1 gap-7 px-6 py-7 sm:px-8 sm:py-8 lg:grid-cols-[minmax(0,1fr)_470px] lg:items-center lg:gap-10">
-          <div className="min-w-0">
-            <div className="inline-flex items-center gap-2 rounded-full border border-line bg-white/10 px-3 py-1.5 text-xs font-semibold text-titanium">
-              <Activity aria-hidden="true" className="text-[var(--accent)]" size={14} />
-              {tx(locale, "Portfolio and cashflow overview")}
-            </div>
-            <h3 className="mt-4 text-3xl font-semibold tracking-[-0.05em] text-ink sm:text-4xl">
-              {tx(locale, "Financial health")}
-            </h3>
-            <p className="mt-3 max-w-2xl text-sm leading-7 text-titanium">
-              {zh
-                ? "這裡用現有資料估算淨資產、儲蓄率、固定支出壓力與負債收入比。它是管理提醒，不是投資建議。"
-                : "This estimates net worth, savings rate, fixed-cost pressure, and debt-to-income from your existing data. It is a planning view, not investment advice."}
-            </p>
-            <div className="mt-6 flex flex-wrap gap-2">
-              {[
-                { icon: <CircleDollarSign aria-hidden="true" size={14} />, label: tx(locale, "Assets") },
-                { icon: <BarChart3 aria-hidden="true" size={14} />, label: tx(locale, "Cashflow") },
-                { icon: <ReceiptText aria-hidden="true" size={14} />, label: tx(locale, "Debt") },
-              ].map((item) => (
-                <span
-                  key={item.label}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-titanium"
-                >
-                  {item.icon}
-                  {item.label}
-                </span>
-              ))}
-            </div>
-          </div>
-          <FinancialHealthGauge
-            label={healthLabel}
-            locale={locale}
-            score={healthScore}
-            tone={healthTone}
-          />
-        </div>
-      </section>
-
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
-        <MetricCard label={tx(locale, "Net worth")} value={formatCurrency(netWorthUsd)} trend={netWorthUsd} detail={tx(locale, "Portfolio value minus debt")} icon={<CircleDollarSign size={20} />} />
-        <MetricCard label={tx(locale, "Savings rate")} value={formatHealthRatio(savingsRate)} trend={savingsRate ?? undefined} detail={tx(locale, "Leftover divided by income")} icon={<BarChart3 size={20} />} />
-        <MetricCard label={tx(locale, "Fixed pressure")} value={formatHealthRatio(fixedPressure)} trend={fixedPressure === null ? undefined : -fixedPressure} detail={tx(locale, "Recurring plus debt minimums")} icon={<RefreshCw size={20} />} />
-        <MetricCard label={tx(locale, "Debt-to-income")} value={formatHealthRatio(debtIncomeRatio)} trend={debtIncomeRatio === null ? undefined : -debtIncomeRatio} detail={tx(locale, "Debt minimums divided by income")} icon={<Activity size={20} />} />
-        <MetricCard label={tx(locale, "Total debt")} value={formatCurrency(debtPrincipalUsd)} trend={debtPrincipalUsd ? -debtPrincipalUsd : undefined} detail={activeDebts.length ? (zh ? `${activeDebts.length} 筆啟用債務` : `${activeDebts.length} active debts`) : (tx(locale, "No active debts"))} icon={<ReceiptText size={20} />} />
-        <MetricCard label={tx(locale, "Data quality")} value={dataIssues ? `${dataIssues}` : (tx(locale, "Good"))} trend={dataIssues ? -dataIssues : 1} detail={tx(locale, "Unknown cost or missing price count")} icon={<ShieldCheck size={20} />} />
+        <MetricCard label={tx(locale, "Net worth")} value={money.fmtUsd(netWorthUsd)} trend={netWorthUsd} info={tx(locale, "Portfolio value minus debt")} icon={<CircleDollarSign size={20} />} />
+        <MetricCard label={tx(locale, "Savings rate")} value={formatHealthRatio(savingsRate)} trend={savingsRate ?? undefined} info={tx(locale, "Leftover divided by income")} icon={<BarChart3 size={20} />} />
+        <MetricCard label={tx(locale, "Fixed pressure")} value={formatHealthRatio(fixedPressure)} trend={fixedPressure === null ? undefined : -fixedPressure} info={tx(locale, "Recurring plus debt minimums")} icon={<RefreshCw size={20} />} />
+        <MetricCard label={tx(locale, "Debt-to-income")} value={formatHealthRatio(debtIncomeRatio)} trend={debtIncomeRatio === null ? undefined : -debtIncomeRatio} info={tx(locale, "Debt minimums divided by income")} icon={<Activity size={20} />} />
+        <MetricCard label={tx(locale, "Total debt")} value={money.fmtUsd(debtPrincipalUsd)} trend={debtPrincipalUsd ? -debtPrincipalUsd : undefined} info={activeDebts.length ? (zh ? `${activeDebts.length} 筆啟用債務` : `${activeDebts.length} active debts`) : (tx(locale, "No active debts"))} icon={<ReceiptText size={20} />} />
+        <MetricCard label={tx(locale, "Data quality")} value={dataIssues ? `${dataIssues}` : (tx(locale, "Good"))} trend={dataIssues ? -dataIssues : 1} info={tx(locale, "Unknown cost or missing price count")} icon={<ShieldCheck size={20} />} />
       </div>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.1fr_0.9fr]">
@@ -1860,190 +2251,14 @@ function FinancialHealthView({
         <section className="glass-panel apple-card p-5 sm:p-6">
           <h3 className="text-xl font-semibold text-ink">{tx(locale, "Current inputs")}</h3>
           <div className="mt-4 divide-y divide-line overflow-hidden rounded-3xl border border-line bg-panel/70">
-            <HealthRow label={tx(locale, "Portfolio value")} value={formatCurrency(totals.totalValue)} />
-            <HealthRow label={tx(locale, "Outstanding debt")} value={formatCurrency(debtPrincipalUsd)} />
-            <HealthRow label={tx(locale, "Monthly income")} value={formatCurrency(incomeUsd)} />
-            <HealthRow label={tx(locale, "Estimated leftover")} value={formatCurrency(leftoverUsd)} />
+            <HealthRow label={tx(locale, "Portfolio value")} value={money.fmtUsd(totals.totalValue)} />
+            <HealthRow label={tx(locale, "Outstanding debt")} value={money.fmtUsd(debtPrincipalUsd)} />
+            <HealthRow label={tx(locale, "Monthly income")} value={money.fmtUsd(incomeUsd)} />
+            <HealthRow label={tx(locale, "Estimated leftover")} value={money.fmtUsd(leftoverUsd)} />
             <HealthRow label={tx(locale, "Over-budget categories")} value={`${overBudgetRows.length}`} />
             <HealthRow label={tx(locale, "Subscriptions to review")} value={`${subscriptionsToReview.length}`} />
           </div>
         </section>
-      </div>
-    </div>
-  );
-}
-
-function FinancialHealthGauge({
-  label,
-  locale,
-  score,
-  tone,
-}: {
-  label: string;
-  locale: Locale;
-  score: number;
-  tone: string;
-}) {
-  const zh = locale === "zh";
-  const clampedScore = Math.max(0, Math.min(100, score));
-  const centerX = 110;
-  const centerY = 110;
-  const radius = 78;
-  const startAngle = 135;
-  const sweepAngle = 270;
-  const nextTarget = clampedScore >= 80 ? 100 : clampedScore >= 60 ? 80 : 60;
-  const pointsToTarget = nextTarget - clampedScore;
-  const targetLabel = clampedScore >= 80
-    ? (tx(locale, "perfect"))
-    : clampedScore >= 60
-      ? (tx(locale, "strong"))
-      : (tx(locale, "attention"));
-  const segments = [
-    { from: 0, to: 58, color: "rgb(var(--rose))" },
-    { from: 60, to: 78, color: "rgb(var(--amber))" },
-    { from: 80, to: 100, color: "rgb(var(--mint))" },
-  ];
-  const pointOnArc = (value: number, arcRadius = radius) => {
-    const angle = (startAngle + (value / 100) * sweepAngle) * (Math.PI / 180);
-    return {
-      x: centerX + Math.cos(angle) * arcRadius,
-      y: centerY + Math.sin(angle) * arcRadius,
-    };
-  };
-  const arcPath = (from: number, to: number, arcRadius = radius) => {
-    const start = pointOnArc(from, arcRadius);
-    const end = pointOnArc(to, arcRadius);
-    const arcSweep = ((to - from) / 100) * sweepAngle;
-    return `M ${start.x} ${start.y} A ${arcRadius} ${arcRadius} 0 ${arcSweep > 180 ? 1 : 0} 1 ${end.x} ${end.y}`;
-  };
-  const progressEnd = pointOnArc(Math.max(clampedScore, 0.5));
-
-  return (
-    <div
-      aria-label={`${tx(locale, "Health score")} ${clampedScore} / 100, ${label}`}
-      className="subtle-panel apple-card-sm relative w-full max-w-[470px] overflow-hidden p-5 sm:p-6"
-      role="img"
-    >
-      <div
-        aria-hidden="true"
-        className={clsx(
-          "pointer-events-none absolute -right-12 -top-16 h-40 w-40 rounded-full opacity-[0.08] blur-3xl",
-          clampedScore >= 80 ? "bg-mint" : clampedScore >= 60 ? "bg-amber" : "bg-rose",
-        )}
-      />
-      <div className="relative flex items-center gap-5">
-        <svg aria-hidden="true" className="h-[174px] w-[174px] shrink-0" viewBox="0 0 220 220">
-          <defs>
-            <filter id="health-score-glow" x="-50%" y="-50%" width="200%" height="200%">
-              <feGaussianBlur stdDeviation="3" />
-            </filter>
-          </defs>
-          <path
-            d={arcPath(0, 100)}
-            fill="none"
-            opacity="0.13"
-            stroke="rgb(var(--titanium))"
-            strokeLinecap="round"
-            strokeWidth="13"
-          />
-          {segments.map((segment) => (
-            <path
-              key={segment.from}
-              d={arcPath(segment.from, segment.to, 94)}
-              fill="none"
-              opacity="0.72"
-              stroke={segment.color}
-              strokeLinecap="round"
-              strokeWidth="5"
-            />
-          ))}
-          <path
-            className={tone}
-            d={arcPath(0, Math.max(clampedScore, 0.5))}
-            fill="none"
-            opacity="0.22"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeWidth="18"
-            filter="url(#health-score-glow)"
-          />
-          <path
-            className={tone}
-            d={arcPath(0, Math.max(clampedScore, 0.5))}
-            fill="none"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeWidth="11"
-          />
-          <circle
-            className={tone}
-            cx={progressEnd.x}
-            cy={progressEnd.y}
-            fill="var(--surface-raised)"
-            r="6.5"
-            stroke="currentColor"
-            strokeWidth="4"
-          />
-          <text
-            className={tone}
-            fill="currentColor"
-            fontSize="52"
-            fontWeight="700"
-            letterSpacing="-3"
-            textAnchor="middle"
-            x={centerX}
-            y="111"
-          >
-            {clampedScore}
-          </text>
-          <text
-            fill="rgb(var(--titanium))"
-            fontSize="12"
-            fontWeight="600"
-            letterSpacing="1.2"
-            textAnchor="middle"
-            x={centerX}
-            y="133"
-          >
-            / 100
-          </text>
-          <text
-            fill="rgb(var(--titanium))"
-            fontSize="10"
-            fontWeight="600"
-            letterSpacing="0.8"
-            textAnchor="middle"
-            x={centerX}
-            y="174"
-          >
-            {tx(locale, "HEALTH SCORE")}
-          </text>
-        </svg>
-
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className={clsx("flex h-8 w-8 items-center justify-center rounded-full bg-white/10", tone)}>
-              <ShieldCheck aria-hidden="true" size={17} />
-            </span>
-            <p className="text-sm font-medium text-titanium">{tx(locale, "Financial status")}</p>
-          </div>
-          <p className="mt-4 whitespace-nowrap text-2xl font-semibold leading-tight tracking-[-0.04em] text-ink">{label}</p>
-          <p className="mt-2 text-sm leading-5 text-titanium">
-            {pointsToTarget > 0
-              ? (zh ? `再 ${pointsToTarget} 分即可達${targetLabel}` : `${pointsToTarget} points to ${targetLabel}`)
-              : (tx(locale, "You are in the top range"))}
-          </p>
-          <div className="mt-5 grid grid-cols-3 gap-2" aria-hidden="true">
-            <span className="h-1.5 rounded-full bg-rose opacity-75" />
-            <span className="h-1.5 rounded-full bg-amber opacity-80" />
-            <span className="h-1.5 rounded-full bg-mint opacity-80" />
-          </div>
-          <div className="mt-2 grid grid-cols-3 text-[10px] font-medium text-titanium">
-            <span>{tx(locale, "Build")}</span>
-            <span className="text-center">{tx(locale, "Attention")}</span>
-            <span className="text-right">{tx(locale, "Strong")}</span>
-          </div>
-        </div>
       </div>
     </div>
   );
@@ -2342,6 +2557,8 @@ function ExpandedListModal({
 }
 
 function CashflowView({
+  assetValue,
+  cashValue,
   budgetEditingId,
   budgetForm,
   budgets,
@@ -2376,6 +2593,8 @@ function CashflowView({
   onUpdateForm,
   onUpdateRecurringForm,
 }: {
+  assetValue: number;
+  cashValue: number;
   budgetEditingId: string | null;
   budgetForm: MonthlyBudgetInput;
   budgets: MonthlyBudget[];
@@ -2410,8 +2629,9 @@ function CashflowView({
   onUpdateForm: <K extends keyof CashflowTransactionInput>(key: K, value: CashflowTransactionInput[K]) => void;
   onUpdateRecurringForm: <K extends keyof RecurringExpenseInput>(key: K, value: RecurringExpenseInput[K]) => void;
 }) {
+  const money = useMoney();
   const zh = locale === "zh";
-  const [cashflowMode, setCashflowMode] = useState<"transactions" | "recurring" | "debts" | "budgets">("transactions");
+  const [cashflowMode, setCashflowMode] = useState<"transactions" | "recurring" | "debts" | "budgets" | "flow">("transactions");
   const [overviewMode, setOverviewMode] = useState<"monthly" | "yearly">("monthly");
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(new Date().toISOString().slice(0, 10));
   const [expandedList, setExpandedList] = useState<"transactions" | "recurring" | "debts" | null>(null);
@@ -2430,6 +2650,9 @@ function CashflowView({
   const currentMonthKey = new Date().toISOString().slice(0, 7);
   const currentBudgets = budgets.filter((budget) => budget.month.slice(0, 7) === currentMonthKey);
   const budgetRows = getBudgetRows(currentBudgets, monthTransactions, locale);
+  const totalBudgetRows = budgetRows.filter((row) => row.budget.category === totalBudgetCategory);
+  const categoryBudgetRows = budgetRows.filter((row) => row.budget.category !== totalBudgetCategory);
+  const summaryBudgetRows = totalBudgetRows.length ? totalBudgetRows : categoryBudgetRows;
   const overBudgetRows = budgetRows.filter((row) => row.remaining < 0);
   const activeRecurringExpenses = recurringExpenses.filter((expense) => expense.is_active);
   const activeSubscriptions = activeRecurringExpenses.filter((expense) => expense.is_subscription);
@@ -2442,13 +2665,13 @@ function CashflowView({
     .sort((a, b) => parseDateOnly(a.next_due_date).getTime() - parseDateOnly(b.next_due_date).getTime())
     .slice(0, 5);
   const todayExpenses = transactions.filter((transaction) => transaction.transaction_type === "expense" && isToday(transaction.transaction_date));
-  const todayTotal = formatCashflowTotals(todayExpenses, "expense");
-  const netTotal = formatNetCashflow(monthTransactions);
-  const recurringMonthlyTotal = formatRecurringMonthlyTotal(activeRecurringExpenses);
-  const subscriptionAnnualTotal = formatRecurringAnnualTotal(activeSubscriptions);
+  const todayTotal = formatCashflowTotals(todayExpenses, "expense", money);
+  const netTotal = formatNetCashflow(monthTransactions, money);
+  const recurringMonthlyTotal = formatRecurringMonthlyTotal(activeRecurringExpenses, money);
+  const subscriptionAnnualTotal = formatRecurringAnnualTotal(activeSubscriptions, money);
   const activeDebts = debts.filter((debt) => debt.is_active);
-  const totalDebtPrincipal = formatDebtPrincipalTotal(activeDebts);
-  const totalDebtMonthlyPayment = formatDebtMonthlyPaymentTotal(activeDebts);
+  const totalDebtPrincipal = formatDebtPrincipalTotal(activeDebts, money);
+  const totalDebtMonthlyPayment = formatDebtMonthlyPaymentTotal(activeDebts, money);
   const highestInterestDebt = [...activeDebts].sort((a, b) => b.interest_rate - a.interest_rate)[0] ?? null;
   const upcomingDebtPayments = [...activeDebts]
     .sort((a, b) => parseDateOnly(a.next_payment_date).getTime() - parseDateOnly(b.next_payment_date).getTime())
@@ -2460,8 +2683,8 @@ function CashflowView({
     ? new Date().toLocaleDateString(locale === "zh" ? "zh-TW" : "en-US", { month: "long", year: "numeric" })
     : String(new Date().getFullYear());
   const calendarEvents = useMemo(
-    () => getCashflowCalendarEvents(transactions, activeRecurringExpenses, activeDebts, locale),
-    [activeDebts, activeRecurringExpenses, locale, transactions],
+    () => getCashflowCalendarEvents(transactions, activeRecurringExpenses, activeDebts, locale, money),
+    [activeDebts, activeRecurringExpenses, locale, money, transactions],
   );
   const categoryOptions = cashflowCategories[form.transaction_type];
   const transactionHistoryTitle = transactionHistoryFilter === "income"
@@ -2516,7 +2739,7 @@ function CashflowView({
             label={overviewMode === "monthly" ? (tx(locale, "Monthly income")) : (tx(locale, "Yearly income"))}
             onClick={overviewMode === "monthly" ? () => openTransactionHistory("income") : undefined}
             trend={1}
-            value={formatCurrencyBuckets(overview.income)}
+            value={formatCurrencyBuckets(money, overview.income)}
           />
           <MetricCard
             actionLabel={overviewMode === "monthly" ? (tx(locale, "View monthly expense details")) : undefined}
@@ -2524,7 +2747,7 @@ function CashflowView({
             label={overviewMode === "monthly" ? (tx(locale, "Monthly expenses")) : (tx(locale, "Yearly expenses"))}
             onClick={overviewMode === "monthly" ? () => openTransactionHistory("expense") : undefined}
             trend={-1}
-            value={formatCurrencyBuckets(overview.expenses)}
+            value={formatCurrencyBuckets(money, overview.expenses)}
           />
           <MetricCard
             actionLabel={tx(locale, "View recurring expense details")}
@@ -2532,7 +2755,7 @@ function CashflowView({
             label={overviewMode === "monthly" ? (tx(locale, "Recurring")) : (tx(locale, "Annualized recurring"))}
             onClick={() => setExpandedList("recurring")}
             trend={hasCurrencyValue(overview.recurring) ? -1 : undefined}
-            value={formatCurrencyBuckets(overview.recurring)}
+            value={formatCurrencyBuckets(money, overview.recurring)}
           />
           <MetricCard
             actionLabel={tx(locale, "View loan and debt details")}
@@ -2540,15 +2763,16 @@ function CashflowView({
             label={overviewMode === "monthly" ? (tx(locale, "Debt minimums")) : (tx(locale, "Annualized debt minimums"))}
             onClick={() => setExpandedList("debts")}
             trend={hasCurrencyValue(overview.debtPayments) ? -1 : undefined}
-            value={formatCurrencyBuckets(overview.debtPayments)}
+            value={formatCurrencyBuckets(money, overview.debtPayments)}
           />
-          <MetricCard label={tx(locale, "Estimated leftover")} value={formatCurrencyBuckets(overview.leftover)} trend={currencyBucketTotal(overview.leftover)} icon={<CircleDollarSign size={20} />} />
+          <MetricCard label={tx(locale, "Estimated leftover")} value={formatCurrencyBuckets(money, overview.leftover)} trend={currencyBucketTotal(overview.leftover)} icon={<CircleDollarSign size={20} />} />
           <MetricCard label={tx(locale, "Fixed pressure")} value={formatPressureRatio(overview)} trend={-overview.pressureRatio} icon={<BarChart3 size={20} />} />
         </div>
       </section>
 
-      <div className="cashflow-mode-switcher grid max-w-[920px] grid-cols-2 gap-1.5 rounded-[22px] border border-line bg-[var(--surface-muted)] p-1.5 sm:grid-cols-4 sm:gap-1 sm:rounded-full sm:p-1">
+      <div className="cashflow-mode-switcher grid max-w-[920px] grid-cols-2 gap-1.5 rounded-[22px] border border-line bg-[var(--surface-muted)] p-1.5 sm:grid-cols-5 sm:gap-1 sm:rounded-full sm:p-1">
         {[
+          { icon: <LineChartIcon size={17} />, id: "flow", label: financialCopy(locale).tab },
           { icon: <ReceiptText size={17} />, id: "transactions", label: tx(locale, "Income / Expense") },
           { icon: <RefreshCw size={17} />, id: "recurring", label: tx(locale, "Recurring / Subscriptions") },
           { icon: <Activity size={17} />, id: "debts", label: tx(locale, "Loans / Debt") },
@@ -2574,6 +2798,8 @@ function CashflowView({
           );
         })}
       </div>
+
+      {cashflowMode === "flow" && <CashflowFlow transactions={transactions} debts={debts} assetValue={assetValue} cashValue={cashValue} locale={locale} />}
 
       {cashflowMode === "transactions" && (
       <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[440px_minmax(0,1fr)] 2xl:grid-cols-[470px_minmax(0,1fr)]">
@@ -2614,8 +2840,9 @@ function CashflowView({
             </Field>
             <Field label={tx(locale, "Currency")}>
               <select className="input-control focus-ring w-full px-3 text-ink" value={form.currency} onChange={(event) => onUpdateForm("currency", event.target.value as Currency)}>
-                <option value="USD">USD</option>
-                <option value="TWD">TWD</option>
+                {supportedCurrencies.map((currency) => (
+                  <option key={currency} value={currency}>{currency}</option>
+                ))}
               </select>
             </Field>
           </div>
@@ -2664,6 +2891,7 @@ function CashflowView({
             </div>
           </Field>
 
+          {form.transaction_type === "expense" && <>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label={tx(locale, "Description")}>
               <input
@@ -2696,6 +2924,8 @@ function CashflowView({
               onChange={(event) => onUpdateForm("notes", event.target.value)}
             />
           </Field>
+
+          </>}
 
           <button className="primary-button focus-ring flex min-h-12 w-full items-center justify-center gap-2 rounded-full px-4 font-medium" type="submit">
             <Plus size={17} />
@@ -2779,7 +3009,7 @@ function CashflowView({
                       <td className="px-4 py-4 text-titanium">{getCategoryLabel(transaction.category, locale)}</td>
                       <td className="px-4 py-4 text-titanium">{getPaymentMethodLabel(transaction.payment_method, locale)}</td>
                       <td className={clsx("whitespace-nowrap px-4 py-4 text-right font-semibold", transaction.transaction_type === "income" ? "text-mint" : "text-rose")}>
-                        {transaction.transaction_type === "income" ? "+" : "-"}{formatCurrency(transaction.amount, transaction.currency)}
+                        {transaction.transaction_type === "income" ? "+" : "-"}{money.fmtAmountFull(transaction.amount, transaction.currency)}
                       </td>
                       <td className="px-4 py-4 text-right">
                         <button
@@ -2848,8 +3078,9 @@ function CashflowView({
               </Field>
               <Field label={tx(locale, "Currency")}>
                 <select className="input-control focus-ring w-full px-3 text-ink" value={recurringForm.currency} onChange={(event) => onUpdateRecurringForm("currency", event.target.value as Currency)}>
-                  <option value="USD">USD</option>
-                  <option value="TWD">TWD</option>
+                  {supportedCurrencies.map((currency) => (
+                    <option key={currency} value={currency}>{currency}</option>
+                  ))}
                 </select>
               </Field>
             </div>
@@ -2988,8 +3219,8 @@ function CashflowView({
                         </span>
                       </button>
                       <div className="text-right">
-                        <p className="font-semibold text-ink">{formatCurrency(expense.amount, expense.currency)}</p>
-                        {expense.is_subscription && <p className="mt-1 text-xs text-titanium">{tx(locale, "Annual")}: {formatRecurringAnnualizedAmount(expense)}</p>}
+                        <p className="font-semibold text-ink">{money.fmtAmountFull(expense.amount, expense.currency)}</p>
+                        {expense.is_subscription && <p className="mt-1 text-xs text-titanium">{tx(locale, "Annual")}: {formatRecurringAnnualizedAmount(expense, money)}</p>}
                         <p className="mt-1 text-xs text-titanium">{tx(locale, "Next")}: {formatDateOnly(expense.next_due_date, locale)}</p>
                       </div>
                     </div>
@@ -3024,7 +3255,7 @@ function CashflowView({
                   <div className="flex items-center justify-between gap-4 rounded-2xl border border-amber/20 bg-amber/5 p-3 text-sm" key={expense.id}>
                     <div>
                       <p className="font-medium text-ink">{expense.name}</p>
-                      <p className="text-xs text-titanium">{getSubscriptionUsageLabel(expense.usage_status ?? "active", locale)} · {formatRecurringAnnualizedAmount(expense)} / {tx(locale, "year")}</p>
+                      <p className="text-xs text-titanium">{getSubscriptionUsageLabel(expense.usage_status ?? "active", locale)} · {formatRecurringAnnualizedAmount(expense, money)} / {tx(locale, "year")}</p>
                     </div>
                     <button className="focus-ring rounded-full border border-line px-3 py-2 text-xs text-titanium hover:text-ink" onClick={() => onEditRecurring(expense)} type="button">
                       {tx(locale, "Review")}
@@ -3045,7 +3276,7 @@ function CashflowView({
                       <p className="font-medium text-ink">{expense.name}</p>
                       <p className="text-xs text-titanium">{tx(locale, "In")} {Math.max(0, daysUntil(expense.next_due_date))} {tx(locale, "days")}</p>
                     </div>
-                    <p className="font-semibold text-ink">{formatCurrency(expense.amount, expense.currency)}</p>
+                    <p className="font-semibold text-ink">{money.fmtAmountFull(expense.amount, expense.currency)}</p>
                   </div>
                 ))}
               </div>
@@ -3062,7 +3293,7 @@ function CashflowView({
                       <p className="font-medium text-ink">{expense.name}</p>
                       <p className="text-xs text-titanium">{formatDateOnly(expense.next_due_date, locale)}</p>
                     </div>
-                    <p className="font-semibold text-ink">{formatCurrency(expense.amount, expense.currency)}</p>
+                    <p className="font-semibold text-ink">{money.fmtAmountFull(expense.amount, expense.currency)}</p>
                   </div>
                 ))}
               </div>
@@ -3118,8 +3349,9 @@ function CashflowView({
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label={tx(locale, "Currency")}>
                 <select className="input-control focus-ring w-full px-3 text-ink" value={debtForm.currency} onChange={(event) => onUpdateDebtForm("currency", event.target.value as Currency)}>
-                  <option value="USD">USD</option>
-                  <option value="TWD">TWD</option>
+                  {supportedCurrencies.map((currency) => (
+                    <option key={currency} value={currency}>{currency}</option>
+                  ))}
                 </select>
               </Field>
               <Field label={tx(locale, "APR %")}>
@@ -3203,12 +3435,12 @@ function CashflowView({
                         <span className="mt-1 block text-xs text-titanium">{getDebtTypeLabel(debt.debt_type, locale)} · {debt.lender || (tx(locale, "No lender"))}</span>
                       </button>
                       <div className="text-right">
-                        <p className="font-semibold text-ink">{formatCurrency(debt.remaining_principal, debt.currency)}</p>
+                        <p className="font-semibold text-ink">{money.fmtAmountFull(debt.remaining_principal, debt.currency)}</p>
                         <p className="mt-1 text-xs text-titanium">{tx(locale, "APR")}: {debt.interest_rate.toFixed(2)}%</p>
                       </div>
                     </div>
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                      <p className="text-xs text-titanium">{tx(locale, "Next payment")}: {formatDateOnly(debt.next_payment_date, locale)} · {formatCurrency(debt.minimum_payment, debt.currency)}</p>
+                      <p className="text-xs text-titanium">{tx(locale, "Next payment")}: {formatDateOnly(debt.next_payment_date, locale)} · {money.fmtAmountFull(debt.minimum_payment, debt.currency)}</p>
                       <div className="flex items-center gap-2">
                         {!debt.is_active && <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs text-titanium">{tx(locale, "Inactive")}</span>}
                         <button
@@ -3237,7 +3469,7 @@ function CashflowView({
                       <p className="font-medium text-ink">{debt.name}</p>
                       <p className="text-xs text-titanium">{formatDateOnly(debt.next_payment_date, locale)}</p>
                     </div>
-                    <p className="font-semibold text-ink">{formatCurrency(debt.minimum_payment, debt.currency)}</p>
+                    <p className="font-semibold text-ink">{money.fmtAmountFull(debt.minimum_payment, debt.currency)}</p>
                   </div>
                 ))}
               </div>
@@ -3252,8 +3484,16 @@ function CashflowView({
         <section className="glass-panel apple-card p-5">
           <div className="mb-5 flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-2xl font-semibold tracking-[-0.035em] text-ink">{budgetEditingId ? (tx(locale, "Edit budget")) : (tx(locale, "Add monthly budget"))}</h3>
-              <p className="mt-1 text-sm text-titanium">{tx(locale, "Set category budgets and compare them with this month's expenses.")}</p>
+              <h3 className="text-2xl font-semibold tracking-[-0.035em] text-ink">
+                {budgetEditingId
+                  ? tx(locale, budgetForm.category === totalBudgetCategory ? "Edit total budget" : "Edit category budget")
+                  : tx(locale, budgetForm.category === totalBudgetCategory ? "Add total budget" : "Add category budget")}
+              </h3>
+              <p className="mt-1 text-sm text-titanium">
+                {tx(locale, budgetForm.category === totalBudgetCategory
+                  ? "Set one total budget and compare it with this month's expenses."
+                  : "Set a limit for one spending category.")}
+              </p>
             </div>
             {budgetEditingId && (
               <button className="focus-ring rounded-full border border-line px-3 py-2 text-xs text-titanium hover:text-ink" onClick={onResetBudget} type="button">
@@ -3263,17 +3503,60 @@ function CashflowView({
           </div>
 
           <form className="space-y-4" onSubmit={onSaveBudget}>
+            <div className="grid grid-cols-2 gap-2 rounded-2xl border border-line bg-[var(--surface-muted)] p-1.5" role="group" aria-label={tx(locale, "Budget mode")}>
+              <button
+                className={clsx(
+                  "focus-ring min-h-11 rounded-xl px-3 text-sm font-semibold transition",
+                  budgetForm.category === totalBudgetCategory ? "bg-[var(--accent)] text-[var(--accent-ink)] shadow-sm" : "text-titanium hover:bg-panel hover:text-ink",
+                )}
+                onClick={() => onUpdateBudgetForm("category", totalBudgetCategory)}
+                type="button"
+              >
+                {tx(locale, "Total budget")}
+              </button>
+              <button
+                className={clsx(
+                  "focus-ring min-h-11 rounded-xl px-3 text-sm font-semibold transition",
+                  budgetForm.category !== totalBudgetCategory ? "bg-[var(--accent)] text-[var(--accent-ink)] shadow-sm" : "text-titanium hover:bg-panel hover:text-ink",
+                )}
+                onClick={() => onUpdateBudgetForm("category", cashflowCategories.expense[0].id)}
+                type="button"
+              >
+                {tx(locale, "Category budget")}
+              </button>
+            </div>
+
             <Field label={tx(locale, "Month")}>
               <input className="input-control focus-ring w-full px-3 text-ink" type="month" value={budgetForm.month} onChange={(event) => onUpdateBudgetForm("month", event.target.value)} required />
             </Field>
 
-            <Field label={tx(locale, "Category")}>
-              <select className="input-control focus-ring w-full px-3 text-ink" value={budgetForm.category} onChange={(event) => onUpdateBudgetForm("category", event.target.value)}>
-                {cashflowCategories.expense.map((category) => (
-                  <option key={category.id} value={category.id}>{zh ? category.zh : category.en}</option>
-                ))}
-              </select>
-            </Field>
+            {budgetForm.category !== totalBudgetCategory && (
+              <Field label={tx(locale, "Category")}>
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 xl:grid-cols-5">
+                  {cashflowCategories.expense.map((category) => {
+                    const CategoryIcon = cashflowCategoryIcons[category.id as keyof typeof cashflowCategoryIcons] ?? Ellipsis;
+                    const active = budgetForm.category === category.id;
+                    return (
+                      <button
+                        aria-pressed={active}
+                        className={clsx(
+                          "focus-ring flex min-h-[76px] flex-col items-center justify-center gap-2 rounded-2xl border px-2 py-3 text-center text-xs font-medium transition duration-200 xl:min-h-[82px]",
+                          active
+                            ? "border-[var(--accent)] bg-[var(--accent-soft)] text-ink shadow-sm"
+                            : "border-line bg-[var(--surface-muted)] text-titanium hover:-translate-y-0.5 hover:border-[var(--accent)] hover:bg-panel hover:text-ink",
+                        )}
+                        key={category.id}
+                        onClick={() => onUpdateBudgetForm("category", category.id)}
+                        type="button"
+                      >
+                        <CategoryIcon className={active ? "text-[var(--accent)]" : ""} size={19} />
+                        <span>{getCategoryLabel(category.id, locale)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </Field>
+            )}
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label={tx(locale, "Budget amount")}>
@@ -3281,8 +3564,9 @@ function CashflowView({
               </Field>
               <Field label={tx(locale, "Currency")}>
                 <select className="input-control focus-ring w-full px-3 text-ink" value={budgetForm.currency} onChange={(event) => onUpdateBudgetForm("currency", event.target.value as Currency)}>
-                  <option value="USD">USD</option>
-                  <option value="TWD">TWD</option>
+                  {supportedCurrencies.map((currency) => (
+                    <option key={currency} value={currency}>{currency}</option>
+                  ))}
                 </select>
               </Field>
             </div>
@@ -3298,65 +3582,47 @@ function CashflowView({
 
             <button className="primary-button focus-ring flex min-h-12 w-full items-center justify-center gap-2 rounded-full px-4 font-medium" type="submit">
               <Plus size={17} />
-              {budgetEditingId ? (tx(locale, "Update budget")) : (tx(locale, "Save budget"))}
+              {budgetEditingId
+                ? tx(locale, budgetForm.category === totalBudgetCategory ? "Update total budget" : "Update category budget")
+                : tx(locale, budgetForm.category === totalBudgetCategory ? "Save total budget" : "Save category budget")}
             </button>
           </form>
         </section>
 
         <section className="space-y-5">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <MetricCard label={tx(locale, "Monthly budget")} value={formatBudgetLimitTotal(budgetRows)} icon={<ReceiptText size={20} />} />
-            <MetricCard label={tx(locale, "Spent")} value={formatBudgetSpentTotal(budgetRows)} trend={budgetRows.length ? -1 : undefined} icon={<Activity size={20} />} />
+            <MetricCard label={tx(locale, "Monthly budget")} value={formatBudgetLimitTotal(summaryBudgetRows, money)} icon={<ReceiptText size={20} />} />
+            <MetricCard label={tx(locale, "Spent")} value={formatBudgetSpentTotal(summaryBudgetRows, money)} trend={summaryBudgetRows.length ? -1 : undefined} icon={<Activity size={20} />} />
             <MetricCard label={tx(locale, "Over budget")} value={String(overBudgetRows.length)} trend={overBudgetRows.length ? -1 : undefined} icon={<ListChecks size={20} />} />
           </div>
 
           <section className="glass-panel apple-card p-5">
             <div className="mb-5">
-              <h3 className="text-xl font-semibold text-ink">{tx(locale, "Category budgets")}</h3>
-              <p className="mt-1 text-sm text-titanium">{tx(locale, "Showing this month's budgets. Click an item to edit.")}</p>
+              <h3 className="text-xl font-semibold text-ink">{tx(locale, "Total budget")}</h3>
+              <p className="mt-1 text-sm text-titanium">{tx(locale, "Showing this month's total budget. Click the item to edit.")}</p>
             </div>
 
-            {!budgetRows.length ? (
+            {!totalBudgetRows.length ? (
               <div className="subtle-panel apple-card-sm p-8 text-center text-titanium">
-                {tx(locale, "Add your first budget to see spending, remaining amount, and over-budget status.")}
+                {tx(locale, "Add a total budget to see spending, remaining amount, and over-budget status.")}
               </div>
             ) : (
-              <div className="grid gap-3">
-                {budgetRows.map((row) => (
-                  <article className="subtle-panel apple-card-sm p-4" key={row.budget.id}>
-                    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-                      <button className="text-left" onClick={() => onEditBudget(row.budget)} type="button">
-                        <span className="block font-semibold text-ink">{getCategoryLabel(row.budget.category, locale)}</span>
-                        <span className="mt-1 block text-xs text-titanium">{formatDateOnly(row.budget.month, locale)} · {row.budget.currency}</span>
-                      </button>
-                      <div className="text-right">
-                        <p className={clsx("font-semibold", row.remaining < 0 ? "text-rose" : "text-ink")}>{formatCurrency(row.remaining, row.budget.currency)}</p>
-                        <p className="mt-1 text-xs text-titanium">{tx(locale, "Remaining")}</p>
-                      </div>
-                    </div>
-                    <div className="mb-3 h-2 rounded-full bg-white/10">
-                      <div
-                        className={clsx("h-2 rounded-full", row.percentUsed > 100 ? "bg-rose" : "bg-mint")}
-                        style={{ width: `${Math.min(100, row.percentUsed)}%` }}
-                      />
-                    </div>
-                    <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-titanium">
-                      <span>{tx(locale, "Spent")} {formatCurrency(row.spent, row.budget.currency)} / {formatCurrency(row.budget.amount, row.budget.currency)}</span>
-                      <div className="flex items-center gap-2">
-                        {row.remaining < 0 && <span className="rounded-full bg-rose/10 px-2.5 py-1 text-rose">{tx(locale, "Over budget")}</span>}
-                        <button
-                          aria-label={zh ? `刪除 ${getCategoryLabel(row.budget.category, locale)} 預算` : `Delete ${getCategoryLabel(row.budget.category, locale)} budget`}
-                          className="focus-ring rounded-xl border border-line p-2 text-titanium transition hover:bg-rose/10 hover:text-rose"
-                          onClick={() => onDeleteBudget(row.budget.id)}
-                          type="button"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </div>
-                  </article>
-                ))}
+              <BudgetRowsList rows={totalBudgetRows} locale={locale} money={money} onDelete={onDeleteBudget} onEdit={onEditBudget} type="total" />
+            )}
+          </section>
+
+          <section className="glass-panel apple-card p-5">
+            <div className="mb-5">
+              <h3 className="text-xl font-semibold text-ink">{tx(locale, "Category budgets")}</h3>
+              <p className="mt-1 text-sm text-titanium">{tx(locale, "Showing this month's category budgets. Click an item to edit.")}</p>
+            </div>
+
+            {!categoryBudgetRows.length ? (
+              <div className="subtle-panel apple-card-sm p-8 text-center text-titanium">
+                {tx(locale, "Add a category budget to track category spending.")}
               </div>
+            ) : (
+              <BudgetRowsList rows={categoryBudgetRows} locale={locale} money={money} onDelete={onDeleteBudget} onEdit={onEditBudget} type="category" />
             )}
           </section>
         </section>
@@ -3395,7 +3661,7 @@ function CashflowView({
                       {transaction.notes && <span className="mt-1 block text-xs text-titanium">{transaction.notes}</span>}
                     </button>
                     <span className={clsx("font-semibold", transaction.transaction_type === "income" ? "text-mint" : "text-rose")}>
-                      {transaction.transaction_type === "income" ? "+" : "-"}{formatCurrency(transaction.amount, transaction.currency)}
+                      {transaction.transaction_type === "income" ? "+" : "-"}{money.fmtAmountFull(transaction.amount, transaction.currency)}
                     </span>
                   </div>
                   <div className="mt-3 flex justify-end">
@@ -3445,8 +3711,8 @@ function CashflowView({
                       </span>
                     </button>
                     <div className="text-right">
-                      <p className="font-semibold text-ink">{formatCurrency(expense.amount, expense.currency)}</p>
-                      {expense.is_subscription && <p className="mt-1 text-xs text-titanium">{tx(locale, "Annual")}: {formatRecurringAnnualizedAmount(expense)}</p>}
+                      <p className="font-semibold text-ink">{money.fmtAmountFull(expense.amount, expense.currency)}</p>
+                      {expense.is_subscription && <p className="mt-1 text-xs text-titanium">{tx(locale, "Annual")}: {formatRecurringAnnualizedAmount(expense, money)}</p>}
                     </div>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -3487,12 +3753,12 @@ function CashflowView({
                       <span className="mt-1 block text-xs text-titanium">{getDebtTypeLabel(debt.debt_type, locale)} · {debt.lender || (tx(locale, "No lender"))}</span>
                     </button>
                     <div className="text-right">
-                      <p className="font-semibold text-ink">{formatCurrency(debt.remaining_principal, debt.currency)}</p>
+                      <p className="font-semibold text-ink">{money.fmtAmountFull(debt.remaining_principal, debt.currency)}</p>
                       <p className="mt-1 text-xs text-titanium">{tx(locale, "APR")}: {debt.interest_rate.toFixed(2)}%</p>
                     </div>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-xs text-titanium">{tx(locale, "Next payment")}: {formatDateOnly(debt.next_payment_date, locale)} · {formatCurrency(debt.minimum_payment, debt.currency)}</p>
+                    <p className="text-xs text-titanium">{tx(locale, "Next payment")}: {formatDateOnly(debt.next_payment_date, locale)} · {money.fmtAmountFull(debt.minimum_payment, debt.currency)}</p>
                     <button
                       aria-label={zh ? `刪除 ${debt.name}` : `Delete ${debt.name}`}
                       className="focus-ring rounded-xl border border-line p-2 text-titanium transition hover:bg-rose/10 hover:text-rose"
@@ -3513,31 +3779,39 @@ function CashflowView({
 }
 
 function HoldingsView({
+  cashOnly = false,
   demo,
   editingId,
   editingWalletCost,
   enriched,
   form,
+  investmentTransactions,
   locale,
   t,
   userId,
+  onClearAll,
   onDelete,
   onEdit,
+  onSell,
   onReset,
   onSave,
   onUpdateForm,
   onHoldingsChanged,
 }: {
+  cashOnly?: boolean;
   demo: boolean;
   editingId: string | null;
   editingWalletCost: boolean;
   enriched: EnrichedHolding[];
   form: HoldingInput;
+  investmentTransactions?: InvestmentTransaction[];
   locale: Locale;
   t: ReturnType<typeof getDictionary>;
   userId: string;
+  onClearAll: () => void;
   onDelete: (id: string) => void;
   onEdit: (holding: Holding) => void;
+  onSell?: (holding: EnrichedHolding) => void;
   onReset: () => void;
   onSave: (event: React.FormEvent<HTMLFormElement>) => void;
   onUpdateForm: <K extends keyof HoldingInput>(key: K, value: HoldingInput[K]) => void;
@@ -3545,6 +3819,19 @@ function HoldingsView({
 }) {
   const [mode, setMode] = useState<"manual" | "wallet">("manual");
   const [manualTab, setManualTab] = useState<"form" | "import">("form");
+  const [holdingsView, setHoldingsView] = useState<"bubbles" | "list">(() => {
+    if (typeof window === "undefined" || cashOnly) return "list";
+    return window.localStorage.getItem("holdingsView") === "list" ? "list" : "bubbles";
+  });
+  const [selectedBubble, setSelectedBubble] = useState<EnrichedHolding | null>(null);
+  const money = useMoney();
+  const visibleHoldings = enriched.filter((holding) => cashOnly ? holding.asset_type === "cash" : holding.asset_type !== "cash");
+
+  function selectHoldingsView(next: "bubbles" | "list") {
+    setHoldingsView(next);
+    setSelectedBubble(null);
+    window.localStorage.setItem("holdingsView", next);
+  }
   const editingWalletHolding = editingWalletCost
     ? enriched.find((holding) => holding.id === editingId) ?? null
     : null;
@@ -3555,11 +3842,11 @@ function HoldingsView({
 
   return (
     <div className="space-y-6">
-      <div className="pill-panel inline-flex p-1">
+      {!cashOnly && <div className="pill-panel inline-flex p-1">
         <button className={clsx("focus-ring rounded-full px-4 py-2 text-sm", mode === "manual" ? "primary-button" : "text-titanium")} onClick={() => setMode("manual")} type="button">{tx(locale, "Manual")}</button>
         <button className={clsx("focus-ring rounded-full px-4 py-2 text-sm", mode === "wallet" ? "primary-button" : "text-titanium")} onClick={() => setMode("wallet")} type="button">{tx(locale, "Address tracking")}</button>
-      </div>
-      {mode === "wallet" ? (
+      </div>}
+      {!cashOnly && mode === "wallet" ? (
         <WalletTracker demo={demo} locale={locale} userId={userId} onHoldingsChanged={onHoldingsChanged} />
       ) : (
         <div className="space-y-5">
@@ -3568,16 +3855,19 @@ function HoldingsView({
               <div className="mb-5 flex items-center gap-2">
                 <Plus size={20} className="text-mint" />
                 <h3 className="text-xl font-semibold text-ink">
-                  {editingWalletCost ? (tx(locale, "Edit cost")) : t.editHolding}
+                  {editingWalletCost ? (tx(locale, "Edit cost")) : cashOnly ? tx(locale, "Edit cash account") : t.editHolding}
                 </h3>
               </div>
             ) : (
               <div className="pill-panel mb-5 inline-flex p-1">
-                <button className={clsx("focus-ring rounded-full px-4 py-2 text-sm", manualTab === "form" ? "primary-button" : "text-titanium")} onClick={() => setManualTab("form")} type="button">{tx(locale, "Add holding")}</button>
-                <button className={clsx("focus-ring rounded-full px-4 py-2 text-sm", manualTab === "import" ? "primary-button" : "text-titanium")} onClick={() => setManualTab("import")} type="button">{tx(locale, "Import Excel")}</button>
+                {!cashOnly && <>
+                  <button className={clsx("focus-ring rounded-full px-4 py-2 text-sm", manualTab === "form" ? "primary-button" : "text-titanium")} onClick={() => setManualTab("form")} type="button">{tx(locale, "Add holding")}</button>
+                  <button className={clsx("focus-ring rounded-full px-4 py-2 text-sm", manualTab === "import" ? "primary-button" : "text-titanium")} onClick={() => setManualTab("import")} type="button">{tx(locale, "Import Excel")}</button>
+                </>}
+                {cashOnly && <span className="px-3 py-2 text-sm font-semibold text-ink">{tx(locale, "Cash accounts")}</span>}
               </div>
             )}
-            {editingId || manualTab === "form" ? (
+            {editingId || cashOnly || manualTab === "form" ? (
             <>
             {editingWalletHolding && (
               <div className="subtle-panel apple-card-sm mb-5 flex flex-wrap items-center justify-between gap-3 p-4">
@@ -3592,57 +3882,70 @@ function HoldingsView({
               </div>
             )}
             <form
-              className={clsx("grid gap-4 md:grid-cols-2", editingWalletCost ? "xl:grid-cols-3" : "xl:grid-cols-4")}
+              className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"
               onSubmit={onSave}
             >
-              {!editingWalletCost && <Field label={t.type}>
+              {!editingWalletCost && !cashOnly && <Field label={t.type}>
                 <select
                   className="input-control focus-ring w-full px-3 text-ink"
-                  value={form.asset_type}
+                  value={form.asset_type === "crypto" ? "crypto" : "stock"}
                   onChange={(event) => {
-                    const nextType = event.target.value as AssetType;
+                    const nextType = event.target.value === "crypto" ? "crypto" : "stock";
                     onUpdateForm("asset_type", nextType);
-                    if (nextType === "tw_stock") onUpdateForm("cost_currency", "TWD");
-                    if (nextType === "us_stock" || nextType === "crypto") onUpdateForm("cost_currency", "USD");
-                    if (nextType === "tw_stock" && form.quantity.includes(".")) {
-                      onUpdateForm("quantity", form.quantity.split(".")[0] || "0");
-                    }
+                    onUpdateForm("symbol", "");
+                    onUpdateForm("name", "");
+                    onUpdateForm("market_data_id", null);
+                    onUpdateForm("market_code", null);
+                    onUpdateForm("exchange_code", null);
+                    onUpdateForm("quote_currency", nextType === "crypto" ? "USD" : null);
+                    onUpdateForm("lot_size", 1);
+                    onUpdateForm("break_even_price", "");
+                    onUpdateForm("gain_calculation_mode", "estimated");
+                    onUpdateForm("average_cost", "");
+                    onUpdateForm("cost_currency", "USD");
                   }}
                 >
                   <option value="crypto">{t.crypto}</option>
-                  <option value="us_stock">{t.us_stock}</option>
-                  <option value="tw_stock">{t.tw_stock}</option>
-                  <option value="cash">{t.cash}</option>
+                  <option value="stock">{t.stock}</option>
                 </select>
               </Field>}
-              {!editingWalletCost && <Field label={t.symbol}>
+              {!editingWalletCost && !cashOnly && <Field label={t.symbol}>
                 {form.asset_type === "crypto" ? (
                   <CryptoSearch value={form.symbol} locale={locale} onChange={(value) => onUpdateForm("symbol", value)} onSelect={(coin) => {
                     onUpdateForm("symbol", coin.symbol);
                     onUpdateForm("name", coin.name);
                     onUpdateForm("market_data_id", coin.id);
                   }} />
-                ) : form.asset_type === "us_stock" || form.asset_type === "tw_stock" ? (
-                  <SymbolSearch value={form.symbol} locale={locale} onChange={(value) => {
+                ) : (
+                  <StockSymbolSearch value={form.symbol} locale={locale} onChange={(value) => {
                     onUpdateForm("symbol", value);
                     onUpdateForm("market_data_id", null);
+                    onUpdateForm("market_code", null);
+                    onUpdateForm("exchange_code", null);
+                    onUpdateForm("quote_currency", null);
+                    onUpdateForm("lot_size", 1);
                   }} onSelect={(result) => {
+                    onUpdateForm("asset_type", result.assetType);
                     onUpdateForm("symbol", result.symbol);
                     if (result.description) onUpdateForm("name", result.description);
                     onUpdateForm("market_data_id", null);
+                    onUpdateForm("market_code", result.market);
+                    onUpdateForm("exchange_code", result.exchange);
+                    onUpdateForm("quote_currency", result.currency);
+                    onUpdateForm("lot_size", result.lotSize);
+                    onUpdateForm("cost_currency", result.currency);
                   }} />
-                ) : (
-                  <input className="input-control focus-ring w-full px-3 text-ink" placeholder="USD, TWD" value={form.symbol} onChange={(event) => onUpdateForm("symbol", event.target.value)} required />
                 )}
               </Field>}
-              {!editingWalletCost && <Field label={t.name}>
+              {!editingWalletCost && <Field label={cashOnly ? tx(locale, "Bank name") : t.name}>
                 <input
                   className="input-control focus-ring w-full px-3 text-ink"
                   value={form.name}
                   onChange={(event) => onUpdateForm("name", event.target.value)}
+                  required={cashOnly}
                 />
               </Field>}
-              {!editingWalletCost && <Field label={form.asset_type === "tw_stock" ? t.quantityLots : t.quantity}>
+              {!editingWalletCost && <Field label={form.asset_type === "tw_stock" ? t.quantityLots : form.asset_type === "cash" ? tx(locale, "Cash balance") : t.quantity}>
                 <input
                   className="input-control focus-ring w-full px-3 text-ink"
                   inputMode={form.asset_type === "tw_stock" ? "numeric" : "decimal"}
@@ -3657,7 +3960,7 @@ function HoldingsView({
                   }}
                 />
               </Field>}
-              <Field label={t.averageCost}>
+              {form.asset_type !== "cash" && <Field label={t.averageCost}>
                 <input
                   className="input-control focus-ring w-full px-3 text-ink"
                   inputMode="decimal"
@@ -3671,22 +3974,75 @@ function HoldingsView({
                     if (form.average_cost === "") onUpdateForm("average_cost", "0");
                   }}
                 />
-              </Field>
-              <label className="input-control flex h-12 items-center gap-3 self-end px-3 text-sm text-ink">
+              </Field>}
+              {form.asset_type !== "cash" && <label className="input-control mt-7 flex h-12 items-center gap-3 px-3 text-sm text-ink">
                 <input className="h-4 w-4" checked={form.cost_known !== false} onChange={(event) => onUpdateForm("cost_known", event.target.checked)} type="checkbox" />
                 {t.costKnown}
-              </label>
+              </label>}
+              {form.asset_type !== "cash" && form.gain_calculation_mode === "break_even" && (
+                <div>
+                  <Field label={t.breakEvenPrice}>
+                    <input
+                      aria-describedby="break-even-help"
+                      className="input-control focus-ring w-full px-3 text-ink"
+                      inputMode="decimal"
+                      type="text"
+                      value={form.break_even_price}
+                      onChange={(event) => {
+                        const nextValue = sanitizeNumericInput(event.target.value, true);
+                        if (nextValue !== null) onUpdateForm("break_even_price", nextValue);
+                      }}
+                    />
+                  </Field>
+                  <p id="break-even-help" className="mt-1.5 text-xs leading-5 text-titanium">
+                    {t.breakEvenHelp}
+                  </p>
+                </div>
+              )}
               <Field label={t.currency}>
                 <select
                   className="input-control focus-ring w-full px-3 text-ink"
                   value={form.cost_currency}
-                  onChange={(event) => onUpdateForm("cost_currency", event.target.value as Currency)}
+                  onChange={(event) => {
+                    const currency = event.target.value as Currency;
+                    onUpdateForm("cost_currency", currency);
+                    if (form.asset_type === "cash") {
+                      onUpdateForm("average_cost", "1");
+                      onUpdateForm("gain_calculation_mode", "average_cost");
+                      onUpdateForm("cost_known", true);
+                    }
+                  }}
                 >
-                  <option value="USD">USD</option>
-                  <option value="TWD">TWD</option>
+                  {supportedCurrencies.map((currency) => (
+                    <option key={currency} value={currency}>{currency}</option>
+                  ))}
                 </select>
               </Field>
-              <div className={clsx("flex gap-3 md:col-span-2", editingWalletCost ? "xl:col-span-3" : "xl:col-span-4")}>
+              {form.asset_type !== "cash" && (
+                <div className="md:col-span-2 xl:col-span-4">
+                  <GainCalculationModeSelector
+                    locale={locale}
+                    value={form.gain_calculation_mode}
+                    onChange={(nextMode) => {
+                      onUpdateForm("gain_calculation_mode", nextMode);
+                      if (nextMode !== "break_even") {
+                        onUpdateForm("break_even_price", "");
+                      }
+                    }}
+                  />
+                  {form.asset_type === "tw_stock" && (
+                    <p className="mt-2 rounded-2xl border border-amber/25 bg-amber/10 px-3.5 py-2.5 text-xs leading-5 text-titanium">
+                      {t.twStockBreakEvenSuggestion}
+                    </p>
+                  )}
+                </div>
+              )}
+              {cashOnly && (
+                <p className="-mt-2 text-xs leading-5 text-titanium md:col-span-2 xl:col-span-4">
+                  {tx(locale, "Cash balances use the selected currency and are converted using live FX rates.")}
+                </p>
+              )}
+              <div className="flex gap-3 md:col-span-2 xl:col-span-4">
                 <button className="primary-button focus-ring flex-1 rounded-full px-4 py-3 font-medium" type="submit">
                   {t.save}
                 </button>
@@ -3712,19 +4068,201 @@ function HoldingsView({
 
           <section className="glass-panel apple-card p-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="text-xl font-semibold text-ink">{t.holdings}</h3>
+              <div className="flex flex-wrap items-center gap-3">
+                <h3 className="text-xl font-semibold text-ink">{cashOnly ? tx(locale, "Cash accounts") : t.holdings}</h3>
+                {!cashOnly && (
+                  <div className="pill-panel inline-flex p-1">
+                    {([
+                      { id: "bubbles", label: tx(locale, "Bubbles") },
+                      { id: "list", label: tx(locale, "List") },
+                    ] as const).map((option) => (
+                      <button
+                        aria-pressed={holdingsView === option.id}
+                        className={clsx("focus-ring rounded-full px-4 py-1.5 text-sm", holdingsView === option.id ? "primary-button" : "text-titanium")}
+                        key={option.id}
+                        onClick={() => selectHoldingsView(option.id)}
+                        type="button"
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
+              {!cashOnly && visibleHoldings.length > 0 && (
+                <button
+                  className="focus-ring inline-flex items-center gap-2 rounded-full border border-rose/30 px-4 py-2 text-sm font-medium text-rose transition hover:bg-rose/10"
+                  onClick={onClearAll}
+                  type="button"
+                >
+                  <Trash2 size={15} />
+                  {tx(locale, "Clear all holdings")}
+                </button>
+              )}
             </div>
-            <HoldingsTable
-              enriched={enriched}
-              t={t}
-              onDelete={onDelete}
-              onEdit={onEdit}
-            />
+            {!cashOnly && holdingsView === "bubbles" ? (
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] xl:items-start">
+                <div>
+                  <div className="mx-auto max-w-[640px]">
+                    <HoldingBubbles
+                      holdings={visibleHoldings}
+                      locale={locale}
+                      selectedId={selectedBubble?.id ?? null}
+                      onSelect={(holding) => setSelectedBubble((current) => current?.id === holding.id ? null : holding)}
+                    />
+                  </div>
+                  <p className="mt-3 text-center text-xs text-titanium">
+                    {tx(locale, "Bubble size shows weight, color shows today's move. Tap a bubble for details.")}
+                  </p>
+                </div>
+                {selectedBubble && (() => {
+                  const holding = visibleHoldings.find((item) => item.id === selectedBubble.id) ?? selectedBubble;
+                  const dayPercent = holding.asset_type === "cash" ? undefined : holding.quote?.dayChangePercent;
+                  return (
+                    <div className="subtle-panel apple-card-sm p-5">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-lg font-semibold text-ink">{holding.symbol}</p>
+                          <p className="mt-0.5 truncate text-xs text-titanium">{holding.name}</p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="font-semibold text-ink">{money.fmtUsd(holding.valueUsd)}</p>
+                          <div className="mt-0.5 flex items-center justify-end gap-0.5">
+                            <p className={clsx("text-xs", !holding.gainKnown ? "text-titanium" : holding.gainUsd >= 0 ? "text-mint" : "text-rose")}>
+                              {!holding.gainKnown ? "N/A" : formatPercent(holding.gainPercent)}
+                            </p>
+                            {holding.gainEstimated && (
+                              <GainCoverageWarning compact label={t.gainEstimateWarning} text={t.gainEstimateWarning} />
+                            )}
+                          </div>
+                          {typeof dayPercent === "number" && (
+                            <span className={clsx("mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold", dayPercent >= 0 ? "bg-mint/10 text-mint" : "bg-rose/10 text-rose")}>
+                              {dayPercent >= 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
+                              {formatPercent(dayPercent)} {tx(locale, "1D")}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-4 grid grid-cols-3 gap-2 rounded-2xl bg-[var(--surface-muted)] p-3 text-xs">
+                        <div><p className="text-[10px] text-titanium">{tx(locale, "Quantity")}</p><p className="mt-1 font-semibold text-ink">{holding.quantity}</p></div>
+                        <div><p className="text-[10px] text-titanium">{tx(locale, "Avg. cost")}</p><p className="mt-1 font-semibold text-ink">{holding.cost_known === false ? "N/A" : money.fmtAmount(holding.average_cost, holding.cost_currency)}</p></div>
+                        <div><p className="text-[10px] text-titanium">{t.breakEvenPrice}</p><p className="mt-1 font-semibold text-ink">{formatBreakEvenPrice(holding, money, t.notApplicable)}</p></div>
+                      </div>
+                      {!demo && (
+                        <div className={clsx("mt-4 grid gap-2", holding.source_kind === "wallet" || !onSell ? "grid-cols-2" : "grid-cols-3")}>
+                          {holding.source_kind !== "wallet" && onSell && (
+                            <button
+                              className="focus-ring flex min-h-10 items-center justify-center gap-1.5 rounded-full border border-rose/30 bg-rose/10 text-sm font-semibold text-rose transition hover:bg-rose/20"
+                              onClick={() => onSell(holding)}
+                              type="button"
+                            >
+                              <TrendingDown size={14} />
+                              {getRecordSaleLabel(locale)}
+                            </button>
+                          )}
+                          <button
+                            className="focus-ring flex min-h-10 items-center justify-center gap-1.5 rounded-full border border-line bg-[var(--surface-muted)] text-sm font-semibold text-ink transition hover:bg-white/10"
+                            onClick={() => onEdit(holding)}
+                            type="button"
+                          >
+                            <Pencil size={14} />
+                            {tx(locale, "Edit")}
+                          </button>
+                          {holding.source_kind !== "wallet" && (
+                            <button
+                              className="focus-ring flex min-h-10 items-center justify-center gap-1.5 rounded-full border border-rose/30 bg-rose/10 text-sm font-semibold text-rose transition hover:bg-rose/20"
+                              onClick={() => {
+                                setSelectedBubble(null);
+                                onDelete(holding.id);
+                              }}
+                              type="button"
+                            >
+                              <Trash2 size={14} />
+                              {tx(locale, "Delete holding")}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : (
+              <HoldingsTable
+                cashOnly={cashOnly}
+                enriched={visibleHoldings}
+                locale={locale}
+                t={t}
+                onDelete={onDelete}
+                onEdit={onEdit}
+                onSell={onSell}
+              />
+            )}
           </section>
+          {!cashOnly && investmentTransactions && (
+            <InvestmentHistoryPanel locale={locale} transactions={investmentTransactions} />
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+function BudgetRowsList({
+  rows,
+  locale,
+  money,
+  onDelete,
+  onEdit,
+  type,
+}: {
+  rows: BudgetRow[];
+  locale: Locale;
+  money: MoneyFmt;
+  onDelete: (id: string) => void;
+  onEdit: (budget: MonthlyBudget) => void;
+  type: "total" | "category";
+}) {
+  const deleteLabel = type === "total" ? tx(locale, "Delete total budget") : tx(locale, "Delete category budget");
+
+  return (
+    <div className="grid gap-3">
+      {rows.map((row) => (
+        <article className="subtle-panel apple-card-sm p-4" key={row.budget.id}>
+          <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+            <button className="text-left" onClick={() => onEdit(row.budget)} type="button">
+              <span className="block font-semibold text-ink">
+                {type === "total" ? tx(locale, "Total budget") : getCategoryLabel(row.budget.category, locale)}
+              </span>
+              <span className="mt-1 block text-xs text-titanium">{formatDateOnly(row.budget.month, locale)} · {row.budget.currency}</span>
+            </button>
+            <div className="text-right">
+              <p className={clsx("font-semibold", row.remaining < 0 ? "text-rose" : "text-ink")}>{money.fmtAmountFull(row.remaining, row.budget.currency)}</p>
+              <p className="mt-1 text-xs text-titanium">{tx(locale, "Remaining")}</p>
+            </div>
+          </div>
+          <div className="mb-3 h-2 rounded-full bg-white/10">
+            <div
+              className={clsx("h-2 rounded-full", row.percentUsed > 100 ? "bg-rose" : "bg-mint")}
+              style={{ width: `${Math.min(100, row.percentUsed)}%` }}
+            />
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-titanium">
+            <span>{tx(locale, "Spent")} {money.fmtAmountFull(row.spent, row.budget.currency)} / {money.fmtAmountFull(row.budget.amount, row.budget.currency)}</span>
+            <div className="flex items-center gap-2">
+              {row.remaining < 0 && <span className="rounded-full bg-rose/10 px-2.5 py-1 text-rose">{tx(locale, "Over budget")}</span>}
+              <button
+                aria-label={deleteLabel}
+                className="focus-ring rounded-xl border border-line p-2 text-titanium transition hover:bg-rose/10 hover:text-rose"
+                onClick={() => onDelete(row.budget.id)}
+                type="button"
+              >
+                <Trash2 size={16} />
+              </button>
+            </div>
+          </div>
+        </article>
+      ))}
     </div>
   );
 }
@@ -3739,6 +4277,13 @@ function HoldingQuantitySummary({
   t: ReturnType<typeof getDictionary>;
 }) {
   const zh = locale === "zh";
+  const labels = {
+    zh: { total: "持有資產", unit: "種", otherStocks: "其他市場股票", help: "同類別、同代號的持倉合計為一種資產；不是持有股數。" },
+    en: { total: "Assets held", unit: "distinct assets", otherStocks: "Other stock markets", help: "Positions with the same type and symbol count as one asset, not the number of shares." },
+    ja: { total: "保有資産", unit: "種類", otherStocks: "その他市場の株式", help: "同じ種類・銘柄の保有分を1種類として集計します。株数ではありません。" },
+    ko: { total: "보유 자산", unit: "종류", otherStocks: "기타 시장 주식", help: "동일 유형과 종목의 보유분은 한 종류로 계산합니다. 주식 수량이 아닙니다." },
+    es: { total: "Activos en cartera", unit: "activos distintos", otherStocks: "Otros mercados bursátiles", help: "Las posiciones del mismo tipo y símbolo cuentan como un activo, no como número de acciones." },
+  }[locale];
   const summary = useMemo(() => {
     const groups = enriched.reduce<Map<string, { assetType: AssetType; name: string; quantity: number; symbol: string }>>((acc, holding) => {
       const symbol = holding.symbol.toUpperCase();
@@ -3754,23 +4299,25 @@ function HoldingQuantitySummary({
     }, new Map());
 
     return [...groups.values()].sort((a, b) => {
-      const typeOrder = ["tw_stock", "us_stock", "crypto", "cash"];
+      const typeOrder = ["stock", "tw_stock", "us_stock", "crypto", "cash"];
       const typeDiff = typeOrder.indexOf(a.assetType) - typeOrder.indexOf(b.assetType);
       if (typeDiff !== 0) return typeDiff;
       return a.symbol.localeCompare(b.symbol);
     });
   }, [enriched]);
 
-  const typeOrder: AssetType[] = ["tw_stock", "us_stock", "crypto", "cash"];
+  const typeOrder: AssetType[] = ["stock", "tw_stock", "us_stock", "crypto", "cash"];
   const typeIcons: Record<AssetType, React.ReactNode> = {
     cash: <CircleDollarSign aria-hidden="true" size={19} />,
     crypto: <WalletCards aria-hidden="true" size={19} />,
+    stock: <LineChartIcon aria-hidden="true" size={19} />,
     tw_stock: <BarChart3 aria-hidden="true" size={19} />,
     us_stock: <LineChartIcon aria-hidden="true" size={19} />,
   };
   const typeTone: Record<AssetType, string> = {
     cash: "text-titanium",
     crypto: "text-mint",
+    stock: "text-blue",
     tw_stock: "text-amber",
     us_stock: "text-blue",
   };
@@ -3811,22 +4358,23 @@ function HoldingQuantitySummary({
             </h3>
           </div>
           <div className="subtle-panel apple-card-sm min-w-[150px] p-4 text-right">
-            <p className="text-xs font-medium text-titanium">{tx(locale, "Aggregated assets")}</p>
+            <p className="text-xs font-medium text-titanium">{labels.total}</p>
             <p className="mt-1 text-3xl font-semibold tracking-[-0.05em] text-ink">{summary.length}</p>
-            <p className="mt-1 text-xs text-titanium">{tx(locale, "symbols")}</p>
+            <p className="mt-1 text-xs text-titanium">{labels.unit}</p>
           </div>
         </div>
 
-        <div className="relative mt-6 grid grid-cols-2 gap-3 md:grid-cols-4">
-          {typeOrder.map((assetType) => {
-            const count = summary.filter((item) => item.assetType === assetType).length;
+        <p className="relative mt-4 text-xs leading-5 text-titanium">{labels.help}</p>
+        <div className="relative mt-4 grid grid-cols-2 gap-3 md:grid-cols-3">
+          {groupedSummary.map(({ assetType, items }) => {
+            const count = items.length;
             return (
               <div className="subtle-panel apple-card-sm flex items-center gap-3 px-4 py-3" key={assetType}>
                 <span className={clsx("flex h-9 w-9 items-center justify-center rounded-xl bg-white/10", typeTone[assetType])}>
                   {typeIcons[assetType]}
                 </span>
                 <div>
-                  <p className="text-xs text-titanium">{t[assetType]}</p>
+                  <p className="text-xs text-titanium">{assetType === "stock" ? labels.otherStocks : t[assetType]}</p>
                   <p className="mt-0.5 text-lg font-semibold text-ink">{count}</p>
                 </div>
               </div>
@@ -3844,7 +4392,7 @@ function HoldingQuantitySummary({
                 {typeIcons[group.assetType]}
               </span>
               <div>
-                <h4 className="text-xl font-semibold text-ink">{t[group.assetType]}</h4>
+                <h4 className="text-xl font-semibold text-ink">{group.assetType === "stock" ? labels.otherStocks : t[group.assetType]}</h4>
                 <p className="mt-0.5 text-xs text-titanium">
                   {zh ? `${group.items.length} 種資產` : `${group.items.length} ${group.items.length === 1 ? "asset" : "assets"}`}
                 </p>
@@ -3954,102 +4502,6 @@ function CryptoSearch({ value, locale, onChange, onSelect }: { value: string; lo
   );
 }
 
-function SymbolSearch({
-  value,
-  locale,
-  onChange,
-  onSelect,
-}: {
-  value: string;
-  locale: Locale;
-  onChange: (value: string) => void;
-  onSelect: (result: SymbolSearchResult) => void;
-}) {
-  const [results, setResults] = useState<SymbolSearchResult[]>([]);
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [searchError, setSearchError] = useState("");
-
-  useEffect(() => {
-    const query = value.trim();
-    if (!query || !open) {
-      setResults([]);
-      setSearchError("");
-      return;
-    }
-
-    const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
-      setLoading(true);
-      setSearchError("");
-      try {
-        const response = await fetch(`/api/symbol-search?q=${encodeURIComponent(query)}`, {
-          signal: controller.signal,
-        });
-        const data = (await response.json()) as { results?: SymbolSearchResult[]; error?: string };
-        setResults(data.results ?? []);
-        if (!response.ok) setSearchError(data.error ?? (tx(locale, "Symbol search is unavailable")));
-      } catch (error) {
-        if (!(error instanceof DOMException && error.name === "AbortError")) {
-          setResults([]);
-          setSearchError(tx(locale, "Symbol search is unavailable"));
-        }
-      } finally {
-        setLoading(false);
-      }
-    }, 300);
-
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-  }, [locale, open, value]);
-
-  return (
-    <div className="relative">
-      <input
-        autoComplete="off"
-        className="input-control focus-ring w-full px-3 text-ink"
-        placeholder="AAPL, TSLA, 2330"
-        required
-        value={value}
-        onChange={(event) => {
-          onChange(event.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => setOpen(true)}
-      />
-      {open && value.trim() && (
-        <div className="glass-panel apple-card-sm absolute z-20 mt-2 max-h-72 w-full overflow-y-auto p-1">
-          {loading && <p className="px-3 py-3 text-sm text-titanium">{tx(locale, "Searching...")}</p>}
-          {!loading && searchError && <p className="px-3 py-3 text-sm text-rose">{searchError}</p>}
-          {!loading && !searchError && results.map((result) => (
-            <button
-              key={`${result.symbol}-${result.description}`}
-              className="focus-ring flex w-full items-start justify-between gap-3 rounded-xl px-3 py-2 text-left hover:bg-white/10"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                onSelect(result);
-                setOpen(false);
-              }}
-              type="button"
-            >
-              <span className="min-w-0">
-                <span className="block font-medium text-ink">{result.displaySymbol || result.symbol}</span>
-                <span className="block truncate text-xs text-titanium">{result.description}</span>
-              </span>
-              {result.type && <span className="shrink-0 text-xs text-titanium">{result.type}</span>}
-            </button>
-          ))}
-          {!loading && !searchError && !results.length && (
-            <p className="px-3 py-3 text-sm text-titanium">{tx(locale, "No matching symbols")}</p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function AnalysisView({
   assetMix,
   currencyMix,
@@ -4063,6 +4515,7 @@ function AnalysisView({
   locale: Locale;
   t: ReturnType<typeof getDictionary>;
 }) {
+  const money = useMoney();
   const zh = locale === "zh";
   const portfolioHoldings = aggregateHoldingsForOverview(enriched);
   const topHoldings = portfolioHoldings.slice(0, 6);
@@ -4074,13 +4527,15 @@ function AnalysisView({
     0,
   );
   const effectiveHoldings = concentrationIndex ? 1 / concentrationIndex : 0;
-  const knownCostValue = portfolioHoldings
-    .filter((holding) => holding.cost_known !== false)
+  const investmentHoldings = portfolioHoldings.filter((holding) => holding.asset_type !== "cash");
+  const investmentValue = investmentHoldings.reduce((sum, holding) => sum + holding.valueUsd, 0);
+  const knownCostValue = investmentHoldings
+    .filter((holding) => holding.gainConfirmed)
     .reduce((sum, holding) => sum + holding.valueUsd, 0);
   const pricedValue = portfolioHoldings
     .filter((holding) => holding.asset_type === "cash" || Boolean(holding.quote))
     .reduce((sum, holding) => sum + holding.valueUsd, 0);
-  const costCoverage = totalValue ? (knownCostValue / totalValue) * 100 : 0;
+  const costCoverage = investmentValue ? (knownCostValue / investmentValue) * 100 : 0;
   const priceCoverage = totalValue ? (pricedValue / totalValue) * 100 : 0;
   const cryptoWeight = portfolioHoldings
     .filter((holding) => holding.asset_type === "crypto")
@@ -4088,8 +4543,8 @@ function AnalysisView({
   const cashWeight = portfolioHoldings
     .filter((holding) => holding.asset_type === "cash")
     .reduce((sum, holding) => sum + holding.allocationPercent, 0);
-  const knownCostHoldings = portfolioHoldings.filter(
-    (holding) => holding.cost_known !== false && holding.costBasisUsd > 0,
+  const knownCostHoldings = investmentHoldings.filter(
+    (holding) => holding.gainConfirmed && holding.costBasisUsd > 0,
   );
   const gainContributors = [...knownCostHoldings]
     .sort((a, b) => Math.abs(b.gainUsd) - Math.abs(a.gainUsd))
@@ -4105,17 +4560,17 @@ function AnalysisView({
     {
       name: tx(locale, "Broad risk-off"),
       detail: tx(locale, "Stocks -10%, crypto -20%"),
-      shocks: { cash: 0, crypto: -0.2, tw_stock: -0.1, us_stock: -0.1 } satisfies Record<AssetType, number>,
+      shocks: { cash: 0, crypto: -0.2, stock: -0.1, tw_stock: -0.1, us_stock: -0.1 } satisfies Record<AssetType, number>,
     },
     {
       name: tx(locale, "Equity correction"),
       detail: tx(locale, "US and Taiwan stocks fall 15%"),
-      shocks: { cash: 0, crypto: 0, tw_stock: -0.15, us_stock: -0.15 } satisfies Record<AssetType, number>,
+      shocks: { cash: 0, crypto: 0, stock: -0.15, tw_stock: -0.15, us_stock: -0.15 } satisfies Record<AssetType, number>,
     },
     {
       name: tx(locale, "Crypto drawdown"),
       detail: tx(locale, "Crypto assets fall 30%"),
-      shocks: { cash: 0, crypto: -0.3, tw_stock: 0, us_stock: 0 } satisfies Record<AssetType, number>,
+      shocks: { cash: 0, crypto: -0.3, stock: 0, tw_stock: 0, us_stock: 0 } satisfies Record<AssetType, number>,
     },
   ].map((scenario) => {
     const impact = portfolioHoldings.reduce(
@@ -4197,8 +4652,8 @@ function AnalysisView({
             value={effectiveHoldings.toFixed(1)}
           />
           <AnalysisMetric
-            detail={tx(locale, "Value with usable cost basis")}
-            label={tx(locale, "Cost coverage")}
+            detail={t.breakEvenPrice}
+            label={t.gainCoverage}
             tone={costCoverage >= 90 ? "positive" : "warning"}
             value={`${costCoverage.toFixed(1)}%`}
           />
@@ -4210,6 +4665,8 @@ function AnalysisView({
           />
         </div>
       </section>
+
+      <BacktestCard holdings={enriched} locale={locale} />
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
         <section className="glass-panel apple-card p-5">
@@ -4319,12 +4776,12 @@ function AnalysisView({
               <p className="text-sm font-semibold text-ink">{scenario.name}</p>
               <p className="mt-1 text-xs leading-5 text-titanium">{scenario.detail}</p>
               <p className="mt-5 text-2xl font-semibold tracking-[-0.04em] text-rose">
-                {formatCurrency(scenario.impact)}
+                {money.fmtUsd(scenario.impact)}
               </p>
               <p className="mt-1 text-sm font-medium text-rose">{formatPercent(scenario.impactPercent)}</p>
               <div className="mt-4 border-t border-line pt-3 text-xs text-titanium">
                 {tx(locale, "Estimated value after shock")}{" "}
-                <span className="font-semibold text-ink">{formatCurrency(scenario.remainingValue)}</span>
+                <span className="font-semibold text-ink">{money.fmtUsd(scenario.remainingValue)}</span>
               </div>
             </div>
           ))}
@@ -4379,6 +4836,7 @@ function ContributionPanel({
   subtitle: string;
   title: string;
 }) {
+  const money = useMoney();
   return (
     <section className="glass-panel apple-card p-5 sm:p-6">
       <h3 className="text-xl font-semibold text-ink">{title}</h3>
@@ -4397,7 +4855,7 @@ function ContributionPanel({
                   </div>
                   <div className="shrink-0 text-right">
                     <p className={clsx("text-sm font-semibold", value >= 0 ? "text-mint" : "text-rose")}>
-                      {formatCurrency(value)}
+                      {money.fmtUsd(value)}
                     </p>
                     <p className={clsx("text-xs", percent >= 0 ? "text-mint" : "text-rose")}>
                       {formatPercent(percent)}
@@ -4425,24 +4883,52 @@ function ContributionPanel({
 }
 
 function SettingsView({
+  biometricAvailable,
+  biometricLock,
+  demo,
+  displayCurrency,
   locale,
   market,
+  nativePlatform,
+  paymentReminders,
   t,
+  onBiometricLockChange,
+  onDeleteAccount,
+  onDisplayCurrencyChange,
   onLocaleChange,
+  onPaymentRemindersChange,
 }: {
+  biometricAvailable: boolean;
+  biometricLock: boolean;
+  demo: boolean;
+  displayCurrency: Currency;
   locale: Locale;
   market: MarketResponse | null;
+  nativePlatform: boolean;
+  paymentReminders: boolean;
   t: ReturnType<typeof getDictionary>;
+  onBiometricLockChange: (next: boolean) => void;
+  onDeleteAccount: () => Promise<void>;
+  onDisplayCurrencyChange: (currency: Currency) => void;
   onLocaleChange: (locale: Locale) => void;
+  onPaymentRemindersChange: (next: boolean) => void;
 }) {
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const usdRate = market
+    ? displayCurrency === "USD"
+      ? null
+      : market.fx.usdRates[displayCurrency] ?? null
+    : null;
   return (
     <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
       <section className="glass-panel apple-card p-5">
         <div className="mb-5 flex items-center gap-2">
           <CircleDollarSign size={20} style={{ color: "var(--accent)" }} />
-          <h3 className="text-xl font-semibold text-ink">外觀</h3>
+          <h3 className="text-xl font-semibold text-ink">{tx(locale, "Appearance")}</h3>
         </div>
-        <p className="mb-4 text-sm leading-6 text-titanium">選擇淺色、深色，或跟隨裝置系統設定。</p>
+        <p className="mb-4 text-sm leading-6 text-titanium">{tx(locale, "Choose light, dark, or follow your device setting.")}</p>
         <ThemeToggle locale={locale} />
       </section>
       <section className="glass-panel apple-card p-5">
@@ -4450,17 +4936,22 @@ function SettingsView({
           <Languages size={20} style={{ color: "var(--accent)" }} />
           <h3 className="text-xl font-semibold text-ink">{t.language}</h3>
         </div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          {localeOrder.map((item) => (
-            <button
-              className={clsx("focus-ring rounded-2xl border border-line px-4 py-4", locale === item ? "primary-button" : "interactive-muted text-ink")}
-              key={item}
-              onClick={() => onLocaleChange(item)}
-              type="button"
-            >
-              {localeNames[item]}
-            </button>
-          ))}
+        <label className="block text-sm font-medium text-titanium" htmlFor="settings-language">
+          {t.language}
+        </label>
+        <div className="relative mt-2">
+          <select
+            aria-label={t.language}
+            className="input-control focus-ring min-h-12 w-full appearance-none px-4 pr-11 text-base font-semibold text-ink"
+            id="settings-language"
+            value={locale}
+            onChange={(event) => onLocaleChange(event.target.value as Locale)}
+          >
+            {localeOrder.map((item) => (
+              <option key={item} value={item}>{localeNames[item]}</option>
+            ))}
+          </select>
+          <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-titanium" size={18} />
         </div>
       </section>
       <section className="glass-panel apple-card p-5">
@@ -4468,59 +4959,167 @@ function SettingsView({
           <Globe2 size={20} className="text-mint" />
           <h3 className="text-xl font-semibold text-ink">{t.baseCurrency}</h3>
         </div>
-        <div className="subtle-panel apple-card-sm p-5">
-          <p className="text-4xl font-semibold text-ink">USD</p>
-          <p className="mt-3 text-sm leading-6 text-titanium">{t.baseCurrencyHelp}</p>
-          {market && <p className="mt-4 text-sm text-titanium">1 USD = {market.fx.usdToTwd.toFixed(2)} TWD</p>}
+        <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
+          {supportedCurrencies.map((item) => (
+            <button
+              className={clsx(
+                "focus-ring rounded-2xl border border-line px-3 py-4 text-center",
+                displayCurrency === item ? "primary-button" : "interactive-muted text-ink",
+              )}
+              key={item}
+              onClick={() => onDisplayCurrencyChange(item)}
+              type="button"
+            >
+              <span className="block text-base font-semibold">{item}</span>
+              <span className="block text-xs opacity-80">{currencySymbols[item]}</span>
+            </button>
+          ))}
         </div>
+        <p className="mt-4 text-sm leading-6 text-titanium">{t.baseCurrencyHelp}</p>
+        {usdRate !== null && usdRate !== undefined && (
+          <p className="mt-2 text-sm text-titanium">1 USD = {usdRate.toFixed(2)} {displayCurrency}</p>
+        )}
       </section>
       <section className="glass-panel apple-card p-5">
         <div className="mb-5 flex items-center gap-2">
           <ShieldCheck size={20} className="text-amber" />
           <h3 className="text-xl font-semibold text-ink">{t.security}</h3>
         </div>
-        <p className="text-sm leading-6 text-titanium">{t.allowedUser}</p>
+        <p className="text-sm leading-6 text-titanium">{tx(locale, "Your account is protected by email sign-in and row-level security.")}</p>
+        {biometricAvailable && (
+          <label className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-4">
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-ink">{tx(locale, "Face ID / Touch ID unlock")}</span>
+              <span className="mt-0.5 block text-xs text-titanium">{tx(locale, "Require biometric authentication to open the app.")}</span>
+            </span>
+            <input
+              checked={biometricLock}
+              className="h-5 w-5 shrink-0"
+              onChange={(event) => onBiometricLockChange(event.target.checked)}
+              type="checkbox"
+            />
+          </label>
+        )}
+        {nativePlatform && (
+          <label className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-4">
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-ink">{tx(locale, "Payment reminders")}</span>
+              <span className="mt-0.5 block text-xs text-titanium">{tx(locale, "Get notified before subscriptions and loan payments are due.")}</span>
+            </span>
+            <input
+              checked={paymentReminders}
+              className="h-5 w-5 shrink-0"
+              onChange={(event) => onPaymentRemindersChange(event.target.checked)}
+              type="checkbox"
+            />
+          </label>
+        )}
       </section>
+      {!demo && (
+        <section className="glass-panel apple-card border-rose/25 p-5 xl:col-span-2">
+          <div className="mb-3 flex items-center gap-2">
+            <Trash2 size={20} className="text-rose" />
+            <h3 className="text-xl font-semibold text-ink">{tx(locale, "Delete account")}</h3>
+          </div>
+          <p className="max-w-2xl text-sm leading-6 text-titanium">
+            {tx(locale, "This permanently deletes your account and all associated portfolio, wallet, cashflow, budget, subscription, and debt data. This cannot be undone.")}
+          </p>
+          <label className="mt-5 block max-w-md">
+            <span className="text-sm font-medium text-ink">{tx(locale, "Type DELETE to confirm.")}</span>
+            <input
+              className="input-control focus-ring mt-2 w-full px-4 text-ink"
+              value={deleteConfirmation}
+              onChange={(event) => setDeleteConfirmation(event.target.value)}
+              placeholder="DELETE"
+            />
+          </label>
+          {deleteError && <p className="mt-3 text-sm text-rose" role="alert">{deleteError}</p>}
+          <button
+            className="focus-ring mt-5 flex min-h-11 items-center justify-center gap-2 rounded-xl border border-rose/30 bg-rose/10 px-4 text-sm font-semibold text-rose transition hover:bg-rose/15 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={deleteConfirmation !== "DELETE" || deleting}
+            onClick={async () => {
+              setDeleting(true);
+              setDeleteError("");
+              try {
+                await onDeleteAccount();
+              } catch (error) {
+                setDeleteError(error instanceof Error ? error.message : tx(locale, "Could not delete this account."));
+                setDeleting(false);
+              }
+            }}
+            type="button"
+          >
+            <Trash2 size={16} />
+            {tx(locale, deleting ? "Deleting account..." : "Delete account permanently")}
+          </button>
+        </section>
+      )}
     </div>
   );
 }
 
 function HoldingsTable({
   allowEdit = true,
+  cashOnly = false,
   compact = false,
   enriched,
+  locale,
   sourceMap,
   t,
   onDelete,
   onEdit,
+  onSell,
 }: {
   allowEdit?: boolean;
+  cashOnly?: boolean;
   compact?: boolean;
   enriched: EnrichedHolding[];
+  locale: Locale;
   sourceMap?: Map<string, EnrichedHolding[]>;
   t: ReturnType<typeof getDictionary>;
   onDelete: (id: string) => void;
   onEdit: (holding: Holding) => void;
+  onSell?: (holding: EnrichedHolding) => void;
 }) {
+  const money = useMoney();
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
   if (!enriched.length) {
-    return <div className="subtle-panel apple-card-sm p-8 text-center text-titanium">{t.noHoldings}</div>;
+    const emptyLabel = cashOnly ? t.noCashAccounts : t.noInvestmentHoldings;
+    return <div className="subtle-panel apple-card-sm p-8 text-center text-titanium">{emptyLabel}</div>;
   }
 
   return (
     <div className="overflow-x-auto rounded-[18px] border border-line">
-      <table className={clsx("w-full border-collapse text-left text-sm", compact ? "min-w-[760px]" : "min-w-[1120px]")}>
+      <table className={clsx("w-full border-collapse text-left text-sm", cashOnly ? (compact ? "min-w-[680px]" : "min-w-[760px]") : compact ? "min-w-[960px]" : "min-w-[1080px]")}>
         <thead className="bg-white/5 text-xs uppercase tracking-[0.08em] text-titanium">
           <tr>
-            <th className="w-[230px] px-4 py-3">{t.symbol}</th>
-            <th className="w-[120px] px-4 py-3">{t.type}</th>
-            {!compact && <th className="w-[150px] px-4 py-3 text-right">{t.quantity}</th>}
-            <th className="w-[140px] px-4 py-3 text-right">{t.averageCost}</th>
-            <th className="w-[130px] px-4 py-3 text-right">{t.value}</th>
-            <th className="w-[145px] px-4 py-3 text-right">{t.gainLoss}</th>
-            {!compact && <th className="w-[100px] px-4 py-3 text-right">{t.allocation}</th>}
-            <th className="w-[110px] px-4 py-3 text-right"></th>
+            <th className="w-[230px] px-4 py-3">{cashOnly ? t.bank : t.symbol}</th>
+            <th className="w-[120px] px-4 py-3">{cashOnly ? t.currency : t.type}</th>
+            {cashOnly ? (
+              <>
+                <th className="w-[160px] px-4 py-3 text-right">{t.originalBalance}</th>
+                <th className="w-[150px] px-4 py-3 text-right">{t.convertedAmount}</th>
+              </>
+            ) : (
+              <>
+                <th className="w-[140px] px-4 py-3 text-right">{t.averageCost}</th>
+                {compact ? (
+                  <>
+                    <th className="w-[145px] px-4 py-3 text-right">{t.netGain}</th>
+                    <th className="w-[130px] px-4 py-3 text-right">{t.currentPrice}</th>
+                    <th className="w-[150px] px-4 py-3 text-right">{t.breakEvenPrice}</th>
+                  </>
+                ) : (
+                  <>
+                    <th className="w-[150px] px-4 py-3 text-right">{t.breakEvenPrice}</th>
+                    <th className="w-[130px] px-4 py-3 text-right">{t.currentPrice}</th>
+                    <th className="w-[145px] px-4 py-3 text-right">{t.netGain}</th>
+                  </>
+                )}
+              </>
+            )}
+            {!compact && <th className="w-[110px] px-4 py-3 text-right"></th>}
           </tr>
         </thead>
         <tbody>
@@ -4529,6 +5128,34 @@ function HoldingsTable({
             const sources = sourceMap?.get(sourceKey) ?? [];
             const hasSources = sources.length > 1;
             const isExpanded = expanded.has(sourceKey);
+            const breakEvenCell = (
+              <td className="whitespace-nowrap px-4 py-4 text-right text-ink" key="break-even">
+                <BreakEvenPriceValue holding={holding} notApplicableLabel={t.notApplicable} />
+              </td>
+            );
+            const currentPriceCell = (
+              <td className="whitespace-nowrap px-4 py-4 text-right text-ink" key="current-price">
+                <CurrentPriceValue holding={holding} unavailableLabel={t.priceUnavailable} />
+              </td>
+            );
+            const netGainCell = (
+              <td
+                className={clsx("whitespace-nowrap px-4 py-4 text-right", !holding.gainKnown ? "text-titanium" : holding.gainUsd >= 0 ? "text-mint" : "text-rose")}
+                key="net-gain"
+              >
+                {!holding.gainKnown ? <UnknownCostLabel label="N/A" /> : (
+                  <div className="flex items-start justify-end gap-1">
+                    <span>
+                      <span className="block">{money.fmtUsd(holding.gainUsd)}</span>
+                      <span className="block text-xs">{formatPercent(holding.gainPercent)}</span>
+                    </span>
+                    {holding.gainEstimated && (
+                      <GainCoverageWarning compact label={t.gainEstimateWarning} text={t.gainEstimateWarning} />
+                    )}
+                  </div>
+                )}
+              </td>
+            );
 
             return (
             <Fragment key={holding.id}>
@@ -4545,50 +5172,83 @@ function HoldingsTable({
                       <ChevronDown className={clsx("transition", isExpanded && "rotate-180")} size={15} />
                     </button>
                   )}
-                  {allowEdit ? <button className="text-left" onClick={() => onEdit(holding)} type="button">
-                    <span className="block font-semibold text-ink">{holding.symbol}</span>
-                    <span className="block text-xs text-titanium">{holding.name}</span>
-                  </button> : <div className="text-left">
-                    <span className="block font-semibold text-ink">{holding.symbol}</span>
-                    <span className="block text-xs text-titanium">{holding.name}</span>
-                  </div>}
+                  {cashOnly && <BankMark fallback={holding.symbol} name={`${holding.name} ${holding.symbol}`} />}
+                  <div className="text-left">
+                    <span className="block font-semibold text-ink">{cashOnly ? holding.name : holding.symbol}</span>
+                    <span className="block text-xs text-titanium">{cashOnly ? holding.symbol : holding.name}</span>
+                  </div>
                 </div>
               </td>
               <td className="px-4 py-4">
-                <span className="inline-flex whitespace-nowrap rounded-full bg-white/10 px-2.5 py-1 text-xs font-medium text-titanium">
-                  {t[holding.asset_type]}
-                </span>
-              </td>
-              {!compact && <td className="whitespace-nowrap px-4 py-4 text-right text-ink">{holding.quantity.toLocaleString("en-US", { maximumFractionDigits: 8 })}</td>}
-              <td className="whitespace-nowrap px-4 py-4 text-right text-ink">
-                <AverageCostValue
-                  editLabel={t.averageCost}
-                  holding={holding}
-                  unknownLabel={t.costUnknown}
-                  onEdit={allowEdit ? onEdit : undefined}
-                />
-              </td>
-              <td className="whitespace-nowrap px-4 py-4 text-right text-ink">{formatCurrency(holding.valueUsd)}</td>
-              <td className={clsx("whitespace-nowrap px-4 py-4 text-right", holding.cost_known === false ? "text-titanium" : holding.gainUsd >= 0 ? "text-mint" : "text-rose")}>
-                {holding.cost_known === false ? <UnknownCostLabel label="N/A" /> : <><span className="block">{formatCurrency(holding.gainUsd)}</span><span className="text-xs">{formatPercent(holding.gainPercent)}</span></>}
-              </td>
-              {!compact && <td className="whitespace-nowrap px-4 py-4 text-right text-ink">{holding.allocationPercent.toFixed(1)}%</td>}
-              <td className="px-4 py-4 text-right">
-                {!compact && (
-                  <button
-                    aria-label={`${t.delete} ${holding.symbol}`}
-                    className="focus-ring ml-auto flex rounded-xl border border-line p-2 text-titanium transition hover:bg-rose/10 hover:text-rose"
-                    onClick={() => onDelete(holding.id)}
-                    type="button"
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                {cashOnly ? <span className="text-ink">{holding.cost_currency}</span> : (
+                  <span className="inline-flex whitespace-nowrap rounded-full bg-white/10 px-2.5 py-1 text-xs font-medium text-titanium">
+                    {t[holding.asset_type]}
+                  </span>
                 )}
               </td>
+              {cashOnly ? (
+                <>
+                  <td className="whitespace-nowrap px-4 py-4 text-right text-ink">{money.fmtAmountFull(holding.quantity, holding.cost_currency)}</td>
+                  <td className="whitespace-nowrap px-4 py-4 text-right text-ink">{money.fmtUsd(holding.valueUsd)}</td>
+                </>
+              ) : (
+                <>
+                  <td className="whitespace-nowrap px-4 py-4 text-right text-ink">
+                    <AverageCostValue
+                      editLabel={t.averageCost}
+                      holding={holding}
+                      unknownLabel={t.costUnknown}
+                    />
+                  </td>
+                  {compact ? (
+                    <>{netGainCell}{currentPriceCell}{breakEvenCell}</>
+                  ) : (
+                    <>{breakEvenCell}{currentPriceCell}{netGainCell}</>
+                  )}
+                </>
+              )}
+              {!compact && <td className="px-4 py-4 text-right">
+                <div className="ml-auto inline-flex overflow-hidden rounded-xl border border-line bg-[var(--surface-muted)] shadow-sm">
+                    {onSell && !cashOnly && holding.source_kind !== "wallet" && (
+                      <button
+                        aria-label={`${getRecordSaleLabel(locale)} ${holding.symbol}`}
+                        className="focus-ring grid h-9 w-9 place-items-center text-rose transition hover:bg-rose/10"
+                        onClick={() => onSell(holding)}
+                        title={getRecordSaleLabel(locale)}
+                        type="button"
+                      >
+                        <TrendingDown size={14} />
+                      </button>
+                    )}
+                    {allowEdit && (
+                      <button
+                        aria-label={`${tx(locale, "Edit")} ${cashOnly ? holding.name : holding.symbol}`}
+                        className={clsx("focus-ring grid h-9 w-9 place-items-center text-titanium transition hover:bg-white/10 hover:text-ink", onSell && !cashOnly && holding.source_kind !== "wallet" && "border-l border-line")}
+                        onClick={() => onEdit(holding)}
+                        title={tx(locale, "Edit")}
+                        type="button"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                    )}
+                    <button
+                      aria-label={`${t.delete} ${holding.symbol}`}
+                      className={clsx(
+                        "focus-ring grid h-9 w-9 place-items-center text-titanium transition hover:bg-rose/10 hover:text-rose",
+                        allowEdit && "border-l border-line",
+                      )}
+                      onClick={() => onDelete(holding.id)}
+                      title={t.delete}
+                      type="button"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                </div>
+              </td>}
             </tr>
             {hasSources && isExpanded && (
               <tr className="border-t border-line bg-white/5">
-                <td colSpan={compact ? 6 : 8} className="px-4 py-4">
+                <td colSpan={cashOnly ? (compact ? 4 : 5) : (compact ? 6 : 7)} className="px-4 py-4">
                   <SourceBreakdown sources={sources} t={t} />
                 </td>
               </tr>
@@ -4664,26 +5324,32 @@ function NavSection({
 }
 
 function MetricCard({
+  footer,
   actionLabel,
   detail,
   icon,
+  info,
   label,
   onClick,
   primary = false,
   trend,
   value,
+  warning,
 }: {
+  footer?: React.ReactNode;
   actionLabel?: string;
   detail?: string;
   icon: React.ReactNode;
+  info?: string;
   label: string;
   onClick?: () => void;
   primary?: boolean;
   trend?: number;
   value: string;
+  warning?: string;
 }) {
   const className = clsx(
-    "glass-panel apple-card p-5 text-left",
+    "glass-panel apple-card min-w-0 p-5 text-left [container-type:inline-size]",
     primary && "sm:col-span-2 xl:col-span-1",
     onClick && "focus-ring group transition duration-200 hover:-translate-y-0.5 hover:border-[var(--accent)]",
   );
@@ -4693,13 +5359,20 @@ function MetricCard({
         <span className="text-sm">{label}</span>
         <span className="flex items-center gap-1.5">
           {icon}
+          {info && <InfoTip text={info} />}
+          {warning && <GainCoverageWarning label={warning} text={warning} />}
           {onClick && <ChevronRight aria-hidden="true" className="transition-transform group-hover:translate-x-0.5" size={15} />}
         </span>
       </div>
-      <p className={clsx("mt-5 font-semibold tracking-[-0.045em]", primary ? "text-4xl" : "text-3xl", trend === undefined ? "text-ink" : trend >= 0 ? "text-mint" : "text-rose")}>
+      {/* Shrink long amounts (e.g. -NT$1,273.38) to fit the card width instead of wrapping. */}
+      <p
+        className={clsx("mt-5 whitespace-nowrap font-semibold leading-tight tracking-[-0.045em]", trend === undefined ? "text-ink" : trend >= 0 ? "text-mint" : "text-rose")}
+        style={{ fontSize: `min(${primary ? 2.25 : 1.875}rem, ${Math.round(160 / Math.max(value.length, 1))}cqi)` }}
+      >
         {value}
       </p>
       {detail && <p className="mt-2 text-sm text-titanium">{detail}</p>}
+      {footer}
     </>
   );
 
@@ -4723,6 +5396,7 @@ function RankPanel({
   t: ReturnType<typeof getDictionary>;
   title: string;
 }) {
+  const money = useMoney();
   return (
     <section className="glass-panel apple-card p-5">
       <h3 className="mb-4 text-xl font-semibold text-ink">{title}</h3>
@@ -4735,7 +5409,7 @@ function RankPanel({
             </div>
             <div className={holding.gainPercent >= 0 ? "text-right text-mint" : "text-right text-rose"}>
               <p className="font-semibold">{formatPercent(holding.gainPercent)}</p>
-              <p className="text-xs">{formatCurrency(holding.gainUsd)}</p>
+              <p className="text-xs">{money.fmtUsd(holding.gainUsd)}</p>
             </div>
           </div>
         ))}
@@ -4745,12 +5419,32 @@ function RankPanel({
 }
 
 function ChartPanel({ data }: { data: Array<{ name: string; value: number }> }) {
+  const total = data.reduce((sum, entry) => sum + entry.value, 0);
+  const chartLabel = data
+    .map((entry) => `${entry.name} ${total > 0 ? ((entry.value / total) * 100).toFixed(1) : "0.0"}%`)
+    .join(", ");
+
   return (
-    <div>
-      <div className="h-60">
+    <div
+      aria-label={chartLabel}
+      className="flex flex-wrap items-center justify-center gap-x-10 gap-y-5"
+      role="img"
+    >
+      <div className="h-60 w-full max-w-[280px] shrink-0">
         <ResponsiveContainer width="100%" height="100%">
         <PieChart>
-          <Pie data={data} dataKey="value" innerRadius={64} outerRadius={105} paddingAngle={4}>
+          <Pie
+            cornerRadius={5}
+            data={data}
+            dataKey="value"
+            innerRadius={68}
+            isAnimationActive={false}
+            label={renderDonutPercentLabel}
+            labelLine={false}
+            outerRadius={101}
+            paddingAngle={2}
+            stroke="none"
+          >
             {data.map((entry, index) => (
               <Cell key={entry.name} fill={chartColors[index % chartColors.length]} />
             ))}
@@ -4759,11 +5453,22 @@ function ChartPanel({ data }: { data: Array<{ name: string; value: number }> }) 
         </PieChart>
         </ResponsiveContainer>
       </div>
-      <div className="mt-2 grid grid-cols-2 gap-2">
+      <div className="grid w-full max-w-sm flex-1 basis-64 gap-2">
         {data.map((entry, index) => (
-          <div key={entry.name} className="flex items-center gap-2 text-sm text-titanium">
-            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: chartColors[index % chartColors.length] }} />
-            <span>{entry.name}</span>
+          <div
+            className="flex items-center justify-between gap-4 rounded-2xl border border-line bg-[var(--surface-muted)] px-3.5 py-3 text-sm"
+            key={entry.name}
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-full ring-4 ring-white/5"
+                style={{ backgroundColor: chartColors[index % chartColors.length] }}
+              />
+              <span className="truncate font-medium text-titanium">{entry.name}</span>
+            </span>
+            <span className="shrink-0 font-semibold tabular-nums text-ink">
+              {total > 0 ? ((entry.value / total) * 100).toFixed(1) : "0.0"}%
+            </span>
           </div>
         ))}
       </div>
@@ -4771,7 +5476,55 @@ function ChartPanel({ data }: { data: Array<{ name: string; value: number }> }) 
   );
 }
 
+function renderDonutPercentLabel({ cx, cy, midAngle, middleRadius, outerRadius, percent }: PieLabelRenderProps) {
+  const share = (percent ?? 0) * 100;
+  if (share < 0.1) return null;
+
+  const label = `${share < 10 ? share.toFixed(1) : share.toFixed(0)}%`;
+  const angle = -(Number(midAngle) * Math.PI) / 180;
+  const compact = share >= 4;
+  const radius = compact ? Number(middleRadius) : Number(outerRadius) + 16;
+  const x = Number(cx) + radius * Math.cos(angle);
+  const y = Number(cy) + radius * Math.sin(angle);
+  const labelWidth = Math.max(36, label.length * 7 + 12);
+
+  return (
+    <g pointerEvents="none">
+      {!compact && (
+        <line
+          stroke="rgba(160, 167, 180, 0.8)"
+          strokeWidth={1}
+          x1={Number(cx) + (Number(outerRadius) + 2) * Math.cos(angle)}
+          x2={x}
+          y1={Number(cy) + (Number(outerRadius) + 2) * Math.sin(angle)}
+          y2={y}
+        />
+      )}
+      <rect
+        fill="rgba(15, 23, 42, 0.76)"
+        height={24}
+        rx={8}
+        width={labelWidth}
+        x={x - labelWidth / 2}
+        y={y - 12}
+      />
+      <text
+        dominantBaseline="central"
+        fill="#fff"
+        fontSize={11}
+        fontWeight={700}
+        textAnchor="middle"
+        x={x}
+        y={y}
+      >
+        {label}
+      </text>
+    </g>
+  );
+}
+
 function ChartLegend({ data }: { data: Array<{ name: string; value: number }> }) {
+  const money = useMoney();
   return (
     <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
       {data.slice(0, 8).map((entry, index) => (
@@ -4780,7 +5533,7 @@ function ChartLegend({ data }: { data: Array<{ name: string; value: number }> })
             <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: chartColors[index % chartColors.length] }} />
             <span className="truncate">{entry.name}</span>
           </span>
-          <span className="shrink-0 font-medium text-ink">{formatCurrency(entry.value)}</span>
+          <span className="shrink-0 font-medium text-ink">{money.fmtUsd(entry.value)}</span>
         </div>
       ))}
     </div>
@@ -4796,6 +5549,7 @@ function MoneyTooltip({
   label?: string;
   payload?: Array<{ color?: string; dataKey?: string; name?: string; value?: number }>;
 }) {
+  const money = useMoney();
   if (!active || !payload?.length) {
     return null;
   }
@@ -4810,7 +5564,7 @@ function MoneyTooltip({
               <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color ?? "var(--accent)" }} />
               {item.name ?? item.dataKey}
             </span>
-            <span className="font-medium text-ink">{formatCurrency(Number(item.value ?? 0))}</span>
+            <span className="font-medium text-ink">{money.fmtUsd(Number(item.value ?? 0))}</span>
           </p>
         ))}
       </div>
@@ -4819,6 +5573,7 @@ function MoneyTooltip({
 }
 
 function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number }> }) {
+  const money = useMoney();
   if (!active || !payload?.length) {
     return null;
   }
@@ -4826,7 +5581,7 @@ function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{
   return (
     <div className="glass-panel apple-card-sm px-3 py-2 text-sm">
       <p className="text-ink">{item.name}</p>
-      <p className="text-titanium">{formatCurrency(item.value)}</p>
+      <p className="text-titanium">{money.fmtUsd(item.value)}</p>
     </div>
   );
 }
@@ -4842,9 +5597,10 @@ function AverageCostValue({
   onEdit?: (holding: Holding) => void;
   unknownLabel: string;
 }) {
+  const money = useMoney();
   const content = holding.cost_known === false
     ? <UnknownCostLabel label={unknownLabel} />
-    : formatAverageCost(holding);
+    : formatAverageCost(holding, money);
 
   if (holding.source_kind !== "wallet" || !onEdit) return content;
 
@@ -4860,8 +5616,53 @@ function AverageCostValue({
   );
 }
 
-function formatAverageCost(holding: EnrichedHolding) {
-  return formatCurrency(holding.average_cost, holding.cost_currency);
+function formatAverageCost(holding: EnrichedHolding, money: MoneyFmt) {
+  return money.fmtAmountFull(holding.average_cost, holding.cost_currency);
+}
+
+function BreakEvenPriceValue({
+  holding,
+  notApplicableLabel,
+}: {
+  holding: EnrichedHolding;
+  notApplicableLabel: string;
+}) {
+  const money = useMoney();
+  const value = formatBreakEvenPrice(holding, money, notApplicableLabel);
+  return typeof value === "string" && value === "N/A"
+    ? <UnknownCostLabel label={value} />
+    : value;
+}
+
+function formatBreakEvenPrice(
+  holding: EnrichedHolding,
+  money: MoneyFmt,
+  notApplicableLabel: string,
+) {
+  if (holding.gain_calculation_mode !== "break_even") {
+    return notApplicableLabel;
+  }
+
+  return holding.breakEvenKnown && holding.break_even_price !== null
+    ? money.fmtAmountFull(holding.break_even_price, holding.cost_currency)
+    : "N/A";
+}
+
+function CurrentPriceValue({
+  holding,
+  unavailableLabel,
+}: {
+  holding: EnrichedHolding;
+  unavailableLabel: string;
+}) {
+  const money = useMoney();
+
+  if (holding.asset_type === "cash") {
+    return <span className="text-titanium">—</span>;
+  }
+
+  const price = formatCurrentPrice(holding.quote, money);
+  return price ?? <UnknownCostLabel label={unavailableLabel} />;
 }
 
 function SourceBreakdown({
@@ -4874,7 +5675,7 @@ function SourceBreakdown({
   return (
     <div className="grid gap-2">
       {sources.map((source) => (
-        <div className="grid grid-cols-2 gap-3 rounded-2xl border border-line bg-panel/70 p-3 text-sm md:grid-cols-[1.2fr_1fr_1fr_1fr]" key={source.id}>
+        <div className="grid grid-cols-2 gap-3 rounded-2xl border border-line bg-panel/70 p-3 text-sm md:grid-cols-[1.2fr_1fr_1fr_1fr_1fr]" key={source.id}>
           <div className="min-w-0">
             <p className="truncate font-medium text-ink">{source.source_label ?? t.manual}</p>
             <p className="mt-1 truncate text-xs text-titanium">{source.source_kind === "wallet" ? source.source_asset_id : t.manual}</p>
@@ -4884,13 +5685,21 @@ function SourceBreakdown({
             <p className="mt-1 text-ink">{source.quantity.toLocaleString("en-US", { maximumFractionDigits: 8 })}</p>
           </div>
           <div>
-            <p className="text-xs text-titanium">{t.value}</p>
-            <p className="mt-1 text-ink">{formatCurrency(source.valueUsd)}</p>
+            <p className="text-xs text-titanium">{t.currentPrice}</p>
+            <div className="mt-1 text-ink">
+              <CurrentPriceValue holding={source} unavailableLabel={t.priceUnavailable} />
+            </div>
           </div>
           <div>
             <p className="text-xs text-titanium">{t.averageCost}</p>
             <div className="mt-1 text-ink">
               <AverageCostValue editLabel={t.averageCost} holding={source} unknownLabel={t.costUnknown} />
+            </div>
+          </div>
+          <div>
+            <p className="text-xs text-titanium">{t.breakEvenPrice}</p>
+            <div className="mt-1 text-ink">
+              <BreakEvenPriceValue holding={source} notApplicableLabel={t.notApplicable} />
             </div>
           </div>
         </div>
@@ -4908,10 +5717,11 @@ function buildSourceMap(holdings: EnrichedHolding[]) {
 }
 
 function getCategoryLabel(categoryId: string, locale: Locale) {
+  if (categoryId === totalBudgetCategory) return tx(locale, "Total budget");
   const allCategories = [...cashflowCategories.income, ...cashflowCategories.expense];
   const category = allCategories.find((item) => item.id === categoryId);
   if (!category) return categoryId;
-  return locale === "zh" ? category.zh : category.en;
+  return tx(locale, category.en);
 }
 
 function getRecurringCategoryLabel(categoryId: string, locale: Locale) {
@@ -4969,13 +5779,14 @@ function getCashflowCalendarEvents(
   recurringExpenses: RecurringExpense[],
   debts: Debt[],
   locale: Locale,
+  money: MoneyFmt,
 ): CashflowCalendarEvent[] {
   const visibleMonthKeys = new Set(getRecentMonthKeys(12).concat(getFutureMonthKeys(12)));
   const events: CashflowCalendarEvent[] = [];
 
   transactions.forEach((transaction) => {
     events.push({
-      amount: `${transaction.transaction_type === "income" ? "+" : "-"}${formatCurrency(transaction.amount, transaction.currency)}`,
+      amount: `${transaction.transaction_type === "income" ? "+" : "-"}${money.fmtAmount(transaction.amount, transaction.currency)}`,
       date: transaction.transaction_date,
       kind: transaction.transaction_type,
       label: getCategoryLabel(transaction.category, locale),
@@ -4993,7 +5804,7 @@ function getCashflowCalendarEvents(
           const lastDay = new Date(year, month, 0).getDate();
           const day = Math.min(dueDate.getDate(), lastDay);
           events.push({
-            amount: formatCurrency(expense.amount, expense.currency),
+            amount: money.fmtAmount(expense.amount, expense.currency),
             date: `${monthKey}-${String(day).padStart(2, "0")}`,
             kind: "recurring",
             label: expense.is_subscription ? (tx(locale, "Subscription")) : getRecurringCategoryLabel(expense.category, locale),
@@ -5004,7 +5815,7 @@ function getCashflowCalendarEvents(
       }
 
       events.push({
-        amount: formatCurrency(expense.amount, expense.currency),
+        amount: money.fmtAmount(expense.amount, expense.currency),
         date: expense.next_due_date,
         kind: "recurring",
         label: expense.is_subscription ? (tx(locale, "Subscription")) : getRecurringCategoryLabel(expense.category, locale),
@@ -5016,7 +5827,7 @@ function getCashflowCalendarEvents(
     .filter((debt) => debt.is_active)
     .forEach((debt) => {
       events.push({
-        amount: formatCurrency(debt.minimum_payment, debt.currency),
+        amount: money.fmtAmount(debt.minimum_payment, debt.currency),
         date: debt.next_payment_date,
         kind: "debt",
         label: getDebtTypeLabel(debt.debt_type, locale),
@@ -5041,62 +5852,62 @@ function calendarEventTextClass(kind: CashflowCalendarEvent["kind"]) {
   return "text-titanium";
 }
 
-function formatCashflowTotals(transactions: CashflowTransaction[], type: CashflowType) {
-  return formatCurrencyBuckets(
+function formatCashflowTotals(transactions: CashflowTransaction[], type: CashflowType, money: MoneyFmt) {
+  return formatCurrencyBuckets(money,
     transactions
       .filter((transaction) => transaction.transaction_type === type)
       .reduce<Record<Currency, number>>((acc, transaction) => {
         acc[transaction.currency] = (acc[transaction.currency] ?? 0) + transaction.amount;
         return acc;
-      }, { USD: 0, TWD: 0 }),
+      }, emptyCurrencyBuckets()),
   );
 }
 
-function formatNetCashflow(transactions: CashflowTransaction[]) {
-  return formatCurrencyBuckets(
+function formatNetCashflow(transactions: CashflowTransaction[], money: MoneyFmt) {
+  return formatCurrencyBuckets(money,
     transactions.reduce<Record<Currency, number>>((acc, transaction) => {
       const sign = transaction.transaction_type === "income" ? 1 : -1;
       acc[transaction.currency] = (acc[transaction.currency] ?? 0) + transaction.amount * sign;
       return acc;
-    }, { USD: 0, TWD: 0 }),
+    }, emptyCurrencyBuckets()),
   );
 }
 
-function formatRecurringMonthlyTotal(expenses: RecurringExpense[]) {
-  return formatCurrencyBuckets(
+function formatRecurringMonthlyTotal(expenses: RecurringExpense[], money: MoneyFmt) {
+  return formatCurrencyBuckets(money,
     expenses.reduce<Record<Currency, number>>((acc, expense) => {
       const monthlyAmount = expense.frequency === "monthly" ? expense.amount : expense.amount / 12;
       acc[expense.currency] = (acc[expense.currency] ?? 0) + monthlyAmount;
       return acc;
-    }, { USD: 0, TWD: 0 }),
+    }, emptyCurrencyBuckets()),
   );
 }
 
-function formatRecurringAnnualTotal(expenses: RecurringExpense[]) {
-  return formatCurrencyBuckets(
+function formatRecurringAnnualTotal(expenses: RecurringExpense[], money: MoneyFmt) {
+  return formatCurrencyBuckets(money,
     expenses.reduce<Record<Currency, number>>((acc, expense) => {
       const annualAmount = expense.frequency === "monthly" ? expense.amount * 12 : expense.amount;
       acc[expense.currency] = (acc[expense.currency] ?? 0) + annualAmount;
       return acc;
-    }, { USD: 0, TWD: 0 }),
+    }, emptyCurrencyBuckets()),
   );
 }
 
-function formatDebtPrincipalTotal(debts: Debt[]) {
-  return formatCurrencyBuckets(
+function formatDebtPrincipalTotal(debts: Debt[], money: MoneyFmt) {
+  return formatCurrencyBuckets(money,
     debts.reduce<Record<Currency, number>>((acc, debt) => {
       acc[debt.currency] = (acc[debt.currency] ?? 0) + debt.remaining_principal;
       return acc;
-    }, { USD: 0, TWD: 0 }),
+    }, emptyCurrencyBuckets()),
   );
 }
 
-function formatDebtMonthlyPaymentTotal(debts: Debt[]) {
-  return formatCurrencyBuckets(
+function formatDebtMonthlyPaymentTotal(debts: Debt[], money: MoneyFmt) {
+  return formatCurrencyBuckets(money,
     debts.reduce<Record<Currency, number>>((acc, debt) => {
       acc[debt.currency] = (acc[debt.currency] ?? 0) + debt.minimum_payment;
       return acc;
-    }, { USD: 0, TWD: 0 }),
+    }, emptyCurrencyBuckets()),
   );
 }
 
@@ -5121,7 +5932,7 @@ function getBudgetRows(budgets: MonthlyBudget[], transactions: CashflowTransacti
       const spent = transactions
         .filter((transaction) => transaction.transaction_type === "expense")
         .filter((transaction) => transaction.currency === budget.currency)
-        .filter((transaction) => transaction.category === budget.category)
+        .filter((transaction) => budget.category === totalBudgetCategory || transaction.category === budget.category)
         .filter((transaction) => transaction.transaction_date.slice(0, 7) === budget.month.slice(0, 7))
         .reduce((sum, transaction) => sum + transaction.amount, 0);
 
@@ -5139,21 +5950,21 @@ function getBudgetRows(budgets: MonthlyBudget[], transactions: CashflowTransacti
     });
 }
 
-function formatBudgetLimitTotal(rows: BudgetRow[]) {
-  return formatCurrencyBuckets(
+function formatBudgetLimitTotal(rows: BudgetRow[], money: MoneyFmt) {
+  return formatCurrencyBuckets(money,
     rows.reduce<Record<Currency, number>>((acc, row) => {
       acc[row.budget.currency] = (acc[row.budget.currency] ?? 0) + row.budget.amount;
       return acc;
-    }, { USD: 0, TWD: 0 }),
+    }, emptyCurrencyBuckets()),
   );
 }
 
-function formatBudgetSpentTotal(rows: BudgetRow[]) {
-  return formatCurrencyBuckets(
+function formatBudgetSpentTotal(rows: BudgetRow[], money: MoneyFmt) {
+  return formatCurrencyBuckets(money,
     rows.reduce<Record<Currency, number>>((acc, row) => {
       acc[row.budget.currency] = (acc[row.budget.currency] ?? 0) + row.spent;
       return acc;
-    }, { USD: 0, TWD: 0 }),
+    }, emptyCurrencyBuckets()),
   );
 }
 
@@ -5214,13 +6025,13 @@ function formatPressureRatio(overview: MonthlyCashflowOverview) {
   return `${overview.pressureRatio.toFixed(1)}%`;
 }
 
-function getDebtPrincipalUsd(debts: Debt[], twdToUsd: number) {
+function getDebtPrincipalUsd(debts: Debt[], twdToUsd: CurrencyFxInput) {
   return debts
     .filter((debt) => debt.is_active)
     .reduce((sum, debt) => sum + currencyAmountToUsd(debt.remaining_principal, debt.currency, twdToUsd), 0);
 }
 
-function getMonthlyCashflowChartData(transactions: CashflowTransaction[], twdToUsd: number, locale: Locale) {
+function getMonthlyCashflowChartData(transactions: CashflowTransaction[], twdToUsd: CurrencyFxInput, locale: Locale) {
   const monthKeys = getRecentMonthKeys(6);
   const rows = monthKeys.map((monthKey) => ({
     expense: 0,
@@ -5242,7 +6053,7 @@ function getMonthlyCashflowChartData(transactions: CashflowTransaction[], twdToU
   return rows;
 }
 
-function getExpenseCategoryChartData(transactions: CashflowTransaction[], twdToUsd: number, locale: Locale) {
+function getExpenseCategoryChartData(transactions: CashflowTransaction[], twdToUsd: CurrencyFxInput, locale: Locale) {
   const totals = transactions
     .filter((transaction) => transaction.transaction_type === "expense")
     .filter((transaction) => isSameMonth(transaction.transaction_date))
@@ -5258,7 +6069,7 @@ function getExpenseCategoryChartData(transactions: CashflowTransaction[], twdToU
     .sort((a, b) => b.value - a.value);
 }
 
-function getFixedExpenseTrendData(expenses: RecurringExpense[], twdToUsd: number, locale: Locale) {
+function getFixedExpenseTrendData(expenses: RecurringExpense[], twdToUsd: CurrencyFxInput, locale: Locale) {
   const monthKeys = getFutureMonthKeys(6);
   return monthKeys.map((monthKey) => {
     const value = expenses
@@ -5277,7 +6088,7 @@ function getFixedExpenseTrendData(expenses: RecurringExpense[], twdToUsd: number
   });
 }
 
-function getSubscriptionAnnualizedData(expenses: RecurringExpense[], twdToUsd: number) {
+function getSubscriptionAnnualizedData(expenses: RecurringExpense[], twdToUsd: CurrencyFxInput) {
   return expenses
     .filter((expense) => expense.is_active && expense.is_subscription)
     .map((expense) => ({
@@ -5289,7 +6100,7 @@ function getSubscriptionAnnualizedData(expenses: RecurringExpense[], twdToUsd: n
     .slice(0, 8);
 }
 
-function getDebtDeclineData(debts: Debt[], twdToUsd: number, locale: Locale) {
+function getDebtDeclineData(debts: Debt[], twdToUsd: CurrencyFxInput, locale: Locale) {
   const activeDebts = debts.filter((debt) => debt.is_active);
   const totalPrincipal = activeDebts.reduce((sum, debt) => sum + currencyAmountToUsd(debt.remaining_principal, debt.currency, twdToUsd), 0);
   const monthlyPayment = activeDebts.reduce((sum, debt) => sum + currencyAmountToUsd(debt.minimum_payment, debt.currency, twdToUsd), 0);
@@ -5305,7 +6116,7 @@ function getDebtDeclineData(debts: Debt[], twdToUsd: number, locale: Locale) {
   });
 }
 
-function getNetWorthTrendData(transactions: CashflowTransaction[], currentNetWorthUsd: number, twdToUsd: number, locale: Locale) {
+function getNetWorthTrendData(transactions: CashflowTransaction[], currentNetWorthUsd: number, twdToUsd: CurrencyFxInput, locale: Locale) {
   const monthKeys = getRecentMonthKeys(6);
   const monthlyNet = new Map(monthKeys.map((monthKey) => [monthKey, 0]));
 
@@ -5375,9 +6186,9 @@ function compactUsd(value: number) {
 }
 
 
-function formatRecurringAnnualizedAmount(expense: RecurringExpense) {
+function formatRecurringAnnualizedAmount(expense: RecurringExpense, money: MoneyFmt) {
   const annualAmount = expense.frequency === "monthly" ? expense.amount * 12 : expense.amount;
-  return formatCurrency(annualAmount, expense.currency);
+  return money.fmtAmount(annualAmount, expense.currency);
 }
 
 function daysUntil(dateValue: string) {
@@ -5388,17 +6199,28 @@ function daysUntil(dateValue: string) {
   return Math.ceil((dueDate.getTime() - today.getTime()) / 86_400_000);
 }
 
-function formatCurrencyBuckets(values: Record<Currency, number>) {
-  const items = (Object.entries(values) as Array<[Currency, number]>)
-    .filter(([, value]) => Math.abs(value) > 0.000001)
-    .map(([currency, value]) => formatCurrency(value, currency));
-
-  return items.length ? items.join(" / ") : formatCurrency(0);
-}
-
 function holdingSourceKey(holding: EnrichedHolding) {
+  if (holding.asset_type === "cash") {
+    return [holding.asset_type, holding.id].join(":");
+  }
+
   const symbol = holding.symbol.toUpperCase();
   return [holding.asset_type, symbol, holding.market_data_id ?? symbol].join(":");
+}
+
+function sortDashboardHoldings(holdings: EnrichedHolding[]) {
+  const assetOrder: Record<AssetType, number> = {
+    stock: 0,
+    us_stock: 1,
+    tw_stock: 2,
+    crypto: 3,
+    cash: 4,
+  };
+
+  return holdings
+    .map((holding, index) => ({ holding, index }))
+    .sort((left, right) => assetOrder[left.holding.asset_type] - assetOrder[right.holding.asset_type] || left.index - right.index)
+    .map(({ holding }) => holding);
 }
 
 
