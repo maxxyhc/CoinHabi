@@ -887,6 +887,12 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
       setError("Quantity and average cost must be valid numbers.");
       return;
     }
+    // A new zero-quantity position is an empty row that later gets mistaken for
+    // the real one and edited into a duplicate.
+    if (!editingId && form.asset_type !== "cash" && quantity <= 0) {
+      setError(tx(locale, "Quantity must be greater than zero."));
+      return;
+    }
     if (
       editingId &&
       !editingWalletCost &&
@@ -953,7 +959,9 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
         .select("id, quantity, average_cost, break_even_price, gain_calculation_mode, cost_known, name, market_data_id, market_code, exchange_code, quote_currency, lot_size")
         .eq("user_id", userId)
         .eq("source_kind", "manual")
-        .eq("asset_type", payload.asset_type)
+        // Stock types differ only by how the listing was resolved, so a typed
+        // SPCX ("stock") and a searched SPCX ("us_stock") are one position.
+        .in("asset_type", ["stock", "us_stock", "tw_stock"].includes(payload.asset_type) ? ["stock", "us_stock", "tw_stock"] : [payload.asset_type])
         .eq("symbol", payload.symbol)
         .eq("cost_currency", payload.cost_currency)
         .limit(1);
@@ -4143,10 +4151,9 @@ function HoldingsView({
                           )}
                         </div>
                       </div>
-                      <div className="mt-4 grid grid-cols-3 gap-2 rounded-2xl bg-[var(--surface-muted)] p-3 text-xs">
+                      <div className="mt-4 grid grid-cols-2 gap-2 rounded-2xl bg-[var(--surface-muted)] p-3 text-xs">
                         <div><p className="text-[10px] text-titanium">{tx(locale, "Quantity")}</p><p className="mt-1 font-semibold text-ink">{holding.quantity}</p></div>
                         <div><p className="text-[10px] text-titanium">{tx(locale, "Avg. cost")}</p><p className="mt-1 font-semibold text-ink">{holding.cost_known === false ? "N/A" : money.fmtAmount(holding.average_cost, holding.cost_currency)}</p></div>
-                        <div><p className="text-[10px] text-titanium">{t.breakEvenPrice}</p><p className="mt-1 font-semibold text-ink">{formatBreakEvenPrice(holding, money, t.notApplicable)}</p></div>
                       </div>
                       {!demo && (
                         <div className={clsx("mt-4 grid gap-2", holding.source_kind === "wallet" || !onSell ? "grid-cols-2" : "grid-cols-3")}>
@@ -5091,7 +5098,7 @@ function HoldingsTable({
 
   return (
     <div className="overflow-x-auto rounded-[18px] border border-line">
-      <table className={clsx("w-full border-collapse text-left text-sm", cashOnly ? (compact ? "min-w-[680px]" : "min-w-[760px]") : compact ? "min-w-[960px]" : "min-w-[1080px]")}>
+      <table className={clsx("w-full border-collapse text-left text-sm", cashOnly ? (compact ? "min-w-[680px]" : "min-w-[760px]") : compact ? "min-w-[810px]" : "min-w-[930px]")}>
         <thead className="bg-white/5 text-xs uppercase tracking-[0.08em] text-titanium">
           <tr>
             <th className="w-[230px] px-4 py-3">{cashOnly ? t.bank : t.symbol}</th>
@@ -5108,11 +5115,9 @@ function HoldingsTable({
                   <>
                     <th className="w-[145px] px-4 py-3 text-right">{t.netGain}</th>
                     <th className="w-[130px] px-4 py-3 text-right">{t.currentPrice}</th>
-                    <th className="w-[150px] px-4 py-3 text-right">{t.breakEvenPrice}</th>
                   </>
                 ) : (
                   <>
-                    <th className="w-[150px] px-4 py-3 text-right">{t.breakEvenPrice}</th>
                     <th className="w-[130px] px-4 py-3 text-right">{t.currentPrice}</th>
                     <th className="w-[145px] px-4 py-3 text-right">{t.netGain}</th>
                   </>
@@ -5128,11 +5133,6 @@ function HoldingsTable({
             const sources = sourceMap?.get(sourceKey) ?? [];
             const hasSources = sources.length > 1;
             const isExpanded = expanded.has(sourceKey);
-            const breakEvenCell = (
-              <td className="whitespace-nowrap px-4 py-4 text-right text-ink" key="break-even">
-                <BreakEvenPriceValue holding={holding} notApplicableLabel={t.notApplicable} />
-              </td>
-            );
             const currentPriceCell = (
               <td className="whitespace-nowrap px-4 py-4 text-right text-ink" key="current-price">
                 <CurrentPriceValue holding={holding} unavailableLabel={t.priceUnavailable} />
@@ -5201,9 +5201,9 @@ function HoldingsTable({
                     />
                   </td>
                   {compact ? (
-                    <>{netGainCell}{currentPriceCell}{breakEvenCell}</>
+                    <>{netGainCell}{currentPriceCell}</>
                   ) : (
-                    <>{breakEvenCell}{currentPriceCell}{netGainCell}</>
+                    <>{currentPriceCell}{netGainCell}</>
                   )}
                 </>
               )}
@@ -5248,7 +5248,7 @@ function HoldingsTable({
             </tr>
             {hasSources && isExpanded && (
               <tr className="border-t border-line bg-white/5">
-                <td colSpan={cashOnly ? (compact ? 4 : 5) : (compact ? 6 : 7)} className="px-4 py-4">
+                <td colSpan={cashOnly ? (compact ? 4 : 5) : (compact ? 5 : 6)} className="px-4 py-4">
                   <SourceBreakdown sources={sources} t={t} />
                 </td>
               </tr>
@@ -5620,34 +5620,6 @@ function formatAverageCost(holding: EnrichedHolding, money: MoneyFmt) {
   return money.fmtAmountFull(holding.average_cost, holding.cost_currency);
 }
 
-function BreakEvenPriceValue({
-  holding,
-  notApplicableLabel,
-}: {
-  holding: EnrichedHolding;
-  notApplicableLabel: string;
-}) {
-  const money = useMoney();
-  const value = formatBreakEvenPrice(holding, money, notApplicableLabel);
-  return typeof value === "string" && value === "N/A"
-    ? <UnknownCostLabel label={value} />
-    : value;
-}
-
-function formatBreakEvenPrice(
-  holding: EnrichedHolding,
-  money: MoneyFmt,
-  notApplicableLabel: string,
-) {
-  if (holding.gain_calculation_mode !== "break_even") {
-    return notApplicableLabel;
-  }
-
-  return holding.breakEvenKnown && holding.break_even_price !== null
-    ? money.fmtAmountFull(holding.break_even_price, holding.cost_currency)
-    : "N/A";
-}
-
 function CurrentPriceValue({
   holding,
   unavailableLabel,
@@ -5675,7 +5647,7 @@ function SourceBreakdown({
   return (
     <div className="grid gap-2">
       {sources.map((source) => (
-        <div className="grid grid-cols-2 gap-3 rounded-2xl border border-line bg-panel/70 p-3 text-sm md:grid-cols-[1.2fr_1fr_1fr_1fr_1fr]" key={source.id}>
+        <div className="grid grid-cols-2 gap-3 rounded-2xl border border-line bg-panel/70 p-3 text-sm md:grid-cols-[1.2fr_1fr_1fr_1fr]" key={source.id}>
           <div className="min-w-0">
             <p className="truncate font-medium text-ink">{source.source_label ?? t.manual}</p>
             <p className="mt-1 truncate text-xs text-titanium">{source.source_kind === "wallet" ? source.source_asset_id : t.manual}</p>
@@ -5694,12 +5666,6 @@ function SourceBreakdown({
             <p className="text-xs text-titanium">{t.averageCost}</p>
             <div className="mt-1 text-ink">
               <AverageCostValue editLabel={t.averageCost} holding={source} unknownLabel={t.costUnknown} />
-            </div>
-          </div>
-          <div>
-            <p className="text-xs text-titanium">{t.breakEvenPrice}</p>
-            <div className="mt-1 text-ink">
-              <BreakEvenPriceValue holding={source} notApplicableLabel={t.notApplicable} />
             </div>
           </div>
         </div>
