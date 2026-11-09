@@ -537,7 +537,8 @@
     "Updating...": "更新中…",
     "Password updated. Signing you in...": "密碼已更新，正在帶你進入…",
     "This reset link is invalid or expired. Request a new one from the sign-in page.": "重設連結無效或已過期，請回登入頁重新申請。",
-    "More options": "更多選項"
+    "More options": "更多選項",
+    "Quantity must be greater than zero.": "數量必須大於 0。"
   },
   "es": {
     "Loading portfolio": "Cargando tu cartera",
@@ -658,7 +659,8 @@
     "Updating...": "Actualizando...",
     "Password updated. Signing you in...": "Contraseña actualizada. Iniciando sesión...",
     "This reset link is invalid or expired. Request a new one from the sign-in page.": "El enlace no es válido o ha caducado. Solicita uno nuevo desde la página de inicio de sesión.",
-    "More options": "Más opciones"
+    "More options": "Más opciones",
+    "Quantity must be greater than zero.": "La cantidad debe ser mayor que cero."
   },
   "ja": {
     "Loading portfolio": "資産を読み込み中",
@@ -779,7 +781,8 @@
     "Updating...": "更新中…",
     "Password updated. Signing you in...": "パスワードを更新しました。ログインしています…",
     "This reset link is invalid or expired. Request a new one from the sign-in page.": "リセットリンクが無効または期限切れです。ログインページから再度お申し込みください。",
-    "More options": "その他のオプション"
+    "More options": "その他のオプション",
+    "Quantity must be greater than zero.": "数量は0より大きくしてください。"
   },
   "ko": {
     "Loading portfolio": "자산을 불러오는 중",
@@ -900,6 +903,7 @@
     "Updating...": "업데이트 중…",
     "Password updated. Signing you in...": "비밀번호가 업데이트되었습니다. 로그인 중…",
     "This reset link is invalid or expired. Request a new one from the sign-in page.": "재설정 링크가 유효하지 않거나 만료되었습니다. 로그인 페이지에서 다시 요청해 주세요.",
-    "More options": "더 보기"
+    "More options": "더 보기",
+    "Quantity must be greater than zero.": "수량은 0보다 커야 합니다."
   }
 }

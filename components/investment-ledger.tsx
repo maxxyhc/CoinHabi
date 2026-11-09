@@ -239,7 +239,6 @@ export function InvestmentHistoryPanel({
 }) {
   const money = useMoney();
   const c = copy[locale];
-  const rows = transactions.slice(0, compact ? 6 : 12);
 
   return (
     <section className={clsx("border border-line bg-[var(--surface-raised)] shadow-[var(--shadow-soft)]", compact ? "rounded-[24px] p-4" : "glass-panel apple-card p-5 sm:p-6")}>
@@ -247,11 +246,13 @@ export function InvestmentHistoryPanel({
         <History className="text-[var(--accent)]" size={18} />
         <h2 className={clsx("font-semibold text-ink", compact ? "text-[15px]" : "text-xl")}>{c.history}</h2>
       </div>
-      {!rows.length ? (
+      {!transactions.length ? (
         <p className="mt-4 rounded-2xl bg-[var(--surface-muted)] p-4 text-sm leading-6 text-titanium">{c.historyEmpty}</p>
       ) : (
-        <div className="mt-3 divide-y divide-line">
-          {rows.map((transaction) => {
+        // Each row is 61px (36px icon + 24px padding + 1px divider): show ten,
+        // scroll the rest instead of hiding older trades.
+        <div className={clsx("mt-3 divide-y divide-line", transactions.length > 10 && "max-h-[610px] overflow-y-auto overscroll-contain pr-1")}>
+          {transactions.map((transaction) => {
             const selling = transaction.transaction_type === "sell";
             const typeLabel = selling ? c.sell : transaction.transaction_type === "buy" ? c.buy : c.opening;
             const amount = selling ? transaction.proceeds : transaction.cost_basis;
