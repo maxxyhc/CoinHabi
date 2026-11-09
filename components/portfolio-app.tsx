@@ -78,6 +78,7 @@ import { HoldingBubbles } from "@/components/holding-bubbles";
 import { GainCoverageWarning } from "@/components/gain-coverage-warning";
 import { GainCalculationModeSelector } from "@/components/gain-calculation-mode-selector";
 import { BacktestCard } from "@/components/backtest-card";
+import { EarningsCalendar } from "@/components/earnings-calendar";
 import { HoldingsNews } from "@/components/holdings-news";
 import { InfoTip } from "@/components/info-tip";
 import {
@@ -122,7 +123,7 @@ import { getDictionary, isLocale, localeNames, localeOrder, tx } from "@/lib/i18
 import { supportedCurrencies, totalBudgetCategory } from "@/lib/types";
 import type { AssetType, CashflowTransaction, CashflowTransactionInput, CashflowType, CryptoSearchResult, Currency, Debt, DebtInput, DebtType, EnrichedHolding, Holding, HoldingInput, InvestmentSaleInput, InvestmentTransaction, Locale, MarketResponse, MonthlyBudget, MonthlyBudgetInput, RecurringExpense, RecurringExpenseInput } from "@/lib/types";
 
-type Tab = "dashboard" | "holdings" | "quantities" | "bank" | "cashflow" | "financialHealth" | "charts" | "analysis" | "settings";
+type Tab = "dashboard" | "holdings" | "quantities" | "bank" | "cashflow" | "financialHealth" | "charts" | "analysis" | "earnings" | "settings";
 
 
 const emptyForm: HoldingInput = {
@@ -1505,6 +1506,7 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
                 <NavButton active={activeTab === "holdings"} icon={<WalletCards size={18} />} label={t.holdings} onClick={() => setActiveTab("holdings")} />
                 <NavButton active={activeTab === "quantities"} icon={<ListChecks size={18} />} label={t.quantities} onClick={() => setActiveTab("quantities")} />
                 <NavButton active={activeTab === "analysis"} icon={<BarChart3 size={18} />} label={t.analysis} onClick={() => setActiveTab("analysis")} />
+                <NavButton active={activeTab === "earnings"} icon={<CalendarDays size={18} />} label={t.earnings} onClick={() => setActiveTab("earnings")} />
               </NavSection>
               <NavSection label={tx(locale, "Bank")}>
                 <NavButton active={activeTab === "bank"} icon={<Landmark size={18} />} label={tx(locale, "Cash")} onClick={() => { resetCashForm(); setActiveTab("bank"); }} />
@@ -1685,6 +1687,8 @@ export function PortfolioApp({ demo = false }: { demo?: boolean }) {
             />
           )}
 
+          {activeTab === "earnings" && <EarningsCalendar holdings={enriched} locale={locale} />}
+
           {activeTab === "settings" && (
             <SettingsView biometricAvailable={biometricAvailable} biometricLock={biometricLock} demo={demo} displayCurrency={displayCurrency} locale={locale} market={market} nativePlatform={nativePlatform} paymentReminders={paymentReminders} t={t} onBiometricLockChange={changeBiometricLock} onDeleteAccount={deleteAccount} onDisplayCurrencyChange={changeDisplayCurrency} onLocaleChange={changeLocale} onPaymentRemindersChange={changePaymentReminders} />
           )}
@@ -1730,9 +1734,11 @@ function Header({
     <header className="glass-panel apple-card flex items-center justify-between gap-3 px-3.5 py-3 sm:flex-wrap sm:gap-4 sm:px-6 sm:py-4">
       <div className="min-w-0 flex-1">
         <h2 className="truncate text-xl font-semibold capitalize tracking-[-0.035em] text-ink sm:text-2xl">{title}</h2>
-        <p className="mt-1 truncate text-[11px] text-titanium sm:text-xs">
-          {t.lastUpdated}: {refreshedAt ? new Date(refreshedAt).toLocaleString() : "Pending first refresh"}
-        </p>
+        {activeTab !== "dashboard" && (
+          <p className="mt-1 truncate text-[11px] text-titanium sm:text-xs">
+            {t.lastUpdated}: {refreshedAt ? new Date(refreshedAt).toLocaleString() : "Pending first refresh"}
+          </p>
+        )}
       </div>
       <div className="flex shrink-0 items-center gap-1.5 sm:flex-wrap sm:gap-3">
         <ThemeToggle compact locale={locale} />
